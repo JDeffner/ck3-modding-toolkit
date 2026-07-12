@@ -1,0 +1,5 @@
+﻿l_english:
+ my_mod.0001.t:0 "An Arranged Marriage"
+ my_mod.0001.desc:0 "The negotiations are complete. [ROOT.Char.GetFirstName] is to be wed."
+ my_mod.0001.a:0 "Excellent."
+ my_mod_greeting:1 "Greetings, [ROOT.Char.GetTitledFirstName]!"

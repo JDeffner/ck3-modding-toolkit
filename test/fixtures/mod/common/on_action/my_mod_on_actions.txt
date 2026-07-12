@@ -1,0 +1,5 @@
+my_mod_on_marriage = {
+	events = {
+		my_mod.0001
+	}
+}

@@ -1,0 +1,22 @@
+namespace = my_mod
+
+# A string with braces "{" and a comment with } must not break depth tracking
+
+my_mod.0001 = {
+	type = character_event
+	title = my_mod.0001.t
+	desc = my_mod.0001.desc
+	theme = marriage
+
+	option = {
+		name = my_mod.0001.a
+		my_mod_marriage_effect = yes
+	}
+}
+
+my_mod.0002 = {
+	hidden = yes
+	immediate = {
+		add_gold = 10
+	}
+}

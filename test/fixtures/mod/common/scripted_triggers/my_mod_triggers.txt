@@ -1,0 +1,4 @@
+my_mod_can_marry_trigger = {
+	is_adult = yes
+	NOT = { has_trait = celibate }
+}

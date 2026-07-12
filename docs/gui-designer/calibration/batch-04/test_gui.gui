@@ -1,0 +1,240 @@
+# CALIBRATION BATCH 04 — sizeless widgets, % sizes, margin_widget 100%, expand spacer, icon scale, text align, directional margins
+# Spawn:   gui.CreateWidget gui/debug/test_gui.gui test_window
+# Despawn: gui.clearwidgets test_window
+window = {
+	name = "test_window"
+	parentanchor = center
+	size = { 1000 800 }
+	layer = top
+	filter_mouse = all
+	alwaystransparent = no
+
+	using = Window_Background
+	using = Window_Decoration
+	using = Window_Movable
+
+	vbox = {
+		using = Window_Margins
+
+		header_pattern = {
+			layoutpolicy_horizontal = expanding
+
+			blockoverride "header_text"
+			{
+				raw_text = "Calibration batch 04"
+			}
+
+			blockoverride "button_close"
+			{
+				onclick = "[ExecuteConsoleCommand( 'gui.clearwidgets test_window')]"
+			}
+		}
+
+		widget = {
+			size = { 940 650 }
+			background = {
+				texture = "gfx/interface/colors/white.dds"
+				color = { 0 0 0 1 }
+			}
+
+			# ---- ruler ----
+			icon = {
+				position = { 20 12 }
+				size = { 200 12 }
+				texture = "gfx/interface/colors/white.dds"
+				color = { 1 1 1 1 }
+			}
+			icon = {
+				position = { 240 12 }
+				size = { 100 12 }
+				texture = "gfx/interface/colors/white.dds"
+				color = { 1 0 1 1 }
+			}
+
+			# ---- T1: widget with NO size, child icon at (30,20) ----
+			text_single = {
+				position = { 20 32 }
+				raw_text = "T1: sizeless widget"
+			}
+			widget = {
+				position = { 20 60 }
+				size = { 180 120 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				widget = {
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.4 0.1 0.1 1 }
+					}
+					icon = {
+						position = { 30 20 }
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+				}
+			}
+
+			# ---- T2: size = { 50% 50% } on a plain widget in 200x120 ----
+			text_single = {
+				position = { 240 32 }
+				raw_text = "T2: size 50% 50%"
+			}
+			widget = {
+				position = { 240 60 }
+				size = { 200 120 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				widget = {
+					size = { 50% 50% }
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.1 0.25 0.1 1 }
+					}
+				}
+			}
+
+			# ---- T3: margin_widget size 100% 100% + margin { 20 10 } in 200x120 ----
+			text_single = {
+				position = { 480 32 }
+				raw_text = "T3: mw 100% m 20 10"
+			}
+			widget = {
+				position = { 480 60 }
+				size = { 200 120 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				margin_widget = {
+					size = { 100% 100% }
+					margin = { 20 10 }
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.1 0.1 0.4 1 }
+					}
+					icon = {
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+				}
+			}
+
+			# ---- T8: expand = {} spacer between two fixed children (box 200x80) ----
+			text_single = {
+				position = { 720 32 }
+				raw_text = "T8: expand spacer"
+			}
+			widget = {
+				position = { 720 60 }
+				size = { 200 80 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				hbox = {
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.4 0.1 0.1 1 }
+					}
+					icon = {
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+					expand = {}
+					icon = {
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0 1 0 1 }
+					}
+				}
+			}
+
+			# ---- T4: icon scale = 1.5 next to unscaled reference ----
+			text_single = {
+				position = { 20 232 }
+				raw_text = "T4: scale 1.5 vs 1"
+			}
+			icon = {
+				position = { 20 260 }
+				size = { 40 40 }
+				texture = "gfx/interface/colors/white.dds"
+				color = { 0 1 1 1 }
+			}
+			icon = {
+				position = { 100 260 }
+				size = { 40 40 }
+				scale = 1.5
+				texture = "gfx/interface/colors/white.dds"
+				color = { 1 0.5 0 1 }
+			}
+
+			# ---- T6: align in a fixed-size textbox (white text = measurable) ----
+			text_single = {
+				position = { 240 232 }
+				raw_text = "T6: align r|vc and c"
+			}
+			text_single = {
+				position = { 240 260 }
+				size = { 150 40 }
+				autoresize = no
+				align = right|vcenter
+				color = { 1 1 1 1 }
+				raw_text = "MM"
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.5 0 0.5 1 }
+				}
+			}
+			text_single = {
+				position = { 240 320 }
+				size = { 150 40 }
+				autoresize = no
+				align = center
+				color = { 1 1 1 1 }
+				raw_text = "MM"
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0 0.4 0.4 1 }
+				}
+			}
+
+			# ---- T7: margin_top on an hbox (with one 40x40 child, box 180x120) ----
+			text_single = {
+				position = { 480 232 }
+				raw_text = "T7: margin_top 30"
+			}
+			widget = {
+				position = { 480 260 }
+				size = { 180 120 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				hbox = {
+					margin_top = 30
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.4 0.1 0.1 1 }
+					}
+					icon = {
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+				}
+			}
+		}
+	}
+}

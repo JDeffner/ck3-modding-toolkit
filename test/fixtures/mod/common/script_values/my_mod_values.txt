@@ -1,0 +1,6 @@
+my_mod_dowry_value = 25
+
+my_mod_scaled_value = {
+	value = 10
+	multiply = 2
+}

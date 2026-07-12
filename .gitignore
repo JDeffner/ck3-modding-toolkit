@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.vsix
+.vscode-test/
+.claude/
+# Local-only design history and working notes. Tracked exceptions:
+# diagnostics (README + diagnostic codes link to it), gui-designer (the
+# published layout-calibration evidence), guides (referenced by the skill).
+docs/*
+!docs/diagnostics/
+!docs/gui-designer/
+!docs/guides/
+# Machine-specific paths for scripts/tests (copy dev-paths.example.json).
+dev-paths.json

@@ -1,0 +1,19 @@
+--------------------
+
+gold - Compares the gold of the scoped character
+Supported Scopes: character
+
+--------------------
+
+has_trait - Checks if a character has a trait
+Supported Scopes: character
+
+--------------------
+
+is_adult - Checks if a character is an adult
+Supported Scopes: character
+
+--------------------
+
+exists - Checks if the given target exists
+Supported Scopes: none/all

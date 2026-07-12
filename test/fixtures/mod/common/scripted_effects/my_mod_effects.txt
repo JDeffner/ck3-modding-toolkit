@@ -1,0 +1,13 @@
+# Fixture mod scripted effects
+
+my_mod_marriage_effect = {
+	add_gold = 50
+	set_relation = {
+		target = scope:new_spouse
+	}
+}
+
+shared_effect = {
+	# overrides the vanilla effect of the same name
+	add_gold = 999
+}

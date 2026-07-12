@@ -1,0 +1,22 @@
+--------------------
+
+add_gold - Adds gold to a character, in a scripted (i.e. NOT hard-coded) manner
+Supported Scopes: character
+
+--------------------
+
+set_relation - Sets a scripted relation between the scoped character and the target
+The relation name comes from the scripted relations database.
+Supported Scopes: character
+Supported Targets: character
+
+--------------------
+
+trigger_event - Triggers the specified event for the current scope
+Requires Data: yes
+Supported Scopes: none/all
+
+--------------------
+
+remove_trait - Removes a trait from a character
+Supported Scopes: character

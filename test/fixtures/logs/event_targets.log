@@ -1,0 +1,11 @@
+--------------------
+
+culture - The culture of the scoped character
+Input Scopes: character
+Output Scopes: culture
+
+--------------------
+
+primary_title - The primary title of the scoped character
+Input Scopes: character
+Output Scopes: landed title

@@ -1,0 +1,346 @@
+# CALIBRATION BATCH 03 — policy edge cases, flow wrap, margin_widget, scrollarea clip, text wrap/scale
+# Spawn:   gui.CreateWidget gui/debug/test_gui.gui test_window
+# Despawn: gui.clearwidgets test_window
+window = {
+	name = "test_window"
+	parentanchor = center
+	size = { 1000 800 }
+	layer = top
+	filter_mouse = all
+	alwaystransparent = no
+
+	using = Window_Background
+	using = Window_Decoration
+	using = Window_Movable
+
+	vbox = {
+		using = Window_Margins
+
+		header_pattern = {
+			layoutpolicy_horizontal = expanding
+
+			blockoverride "header_text"
+			{
+				raw_text = "Calibration batch 03"
+			}
+
+			blockoverride "button_close"
+			{
+				onclick = "[ExecuteConsoleCommand( 'gui.clearwidgets test_window')]"
+			}
+		}
+
+		widget = {
+			size = { 940 650 }
+			background = {
+				texture = "gfx/interface/colors/white.dds"
+				color = { 0 0 0 1 }
+			}
+
+			# ---- ruler ----
+			icon = {
+				position = { 20 12 }
+				size = { 200 12 }
+				texture = "gfx/interface/colors/white.dds"
+				color = { 1 1 1 1 }
+			}
+			icon = {
+				position = { 240 12 }
+				size = { 100 12 }
+				texture = "gfx/interface/colors/white.dds"
+				color = { 1 0 1 1 }
+			}
+
+			# ---- P1: box size 220x140 LARGER than its 180x120 parent ----
+			text_single = {
+				position = { 20 32 }
+				raw_text = "P1: size 220x140 in 180x120"
+			}
+			widget = {
+				position = { 20 60 }
+				size = { 180 120 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				hbox = {
+					size = { 220 140 }
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.4 0.1 0.1 1 }
+					}
+					icon = {
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+				}
+			}
+
+			# ---- P2: growing with no expanding sibling ----
+			text_single = {
+				position = { 300 32 }
+				raw_text = "P2: growing alone"
+			}
+			widget = {
+				position = { 300 60 }
+				size = { 300 80 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				hbox = {
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.4 0.1 0.1 1 }
+					}
+					icon = {
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+					icon = {
+						layoutpolicy_horizontal = growing
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0 1 0 1 }
+					}
+				}
+			}
+
+			# ---- P3: two expanding with UNEQUAL floors (40 vs 100) ----
+			text_single = {
+				position = { 620 32 }
+				raw_text = "P3: expanding 40 vs 100"
+			}
+			widget = {
+				position = { 620 60 }
+				size = { 300 80 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				hbox = {
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.4 0.1 0.1 1 }
+					}
+					icon = {
+						layoutpolicy_horizontal = expanding
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+					icon = {
+						layoutpolicy_horizontal = expanding
+						size = { 100 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0 1 0 1 }
+					}
+				}
+			}
+
+			# ---- P4: deficit with UNEQUAL floors: preferred 100 vs shrinking 60 in 120 ----
+			text_single = {
+				position = { 20 232 }
+				raw_text = "P4: pref 100 / shrink 60"
+			}
+			widget = {
+				position = { 20 260 }
+				size = { 120 80 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				hbox = {
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.4 0.1 0.1 1 }
+					}
+					icon = {
+						layoutpolicy_horizontal = preferred
+						size = { 100 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+					icon = {
+						layoutpolicy_horizontal = shrinking
+						size = { 60 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0 1 0 1 }
+					}
+				}
+			}
+
+			# ---- Q1: flowcontainer WITH explicit size 200x120 (wrap now?) ----
+			text_single = {
+				position = { 180 232 }
+				raw_text = "Q1: flow size 200x120"
+			}
+			widget = {
+				position = { 180 260 }
+				size = { 200 120 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				flowcontainer = {
+					size = { 200 120 }
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.1 0.1 0.4 1 }
+					}
+					icon = {
+						size = { 50 30 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+					icon = {
+						size = { 50 30 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0 1 0 1 }
+					}
+					icon = {
+						size = { 50 30 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0 0 1 1 }
+					}
+					icon = {
+						size = { 50 30 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 1 0 1 }
+					}
+					icon = {
+						size = { 50 30 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0 1 1 1 }
+					}
+				}
+			}
+
+			# ---- Q2: margin_widget, margin = { 20 10 } in a 200x120 parent ----
+			text_single = {
+				position = { 420 232 }
+				raw_text = "Q2: margin_widget 20 10"
+			}
+			widget = {
+				position = { 420 260 }
+				size = { 200 120 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				margin_widget = {
+					margin = { 20 10 }
+					background = {
+						texture = "gfx/interface/colors/white.dds"
+						color = { 0.1 0.25 0.1 1 }
+					}
+					icon = {
+						size = { 40 40 }
+						texture = "gfx/interface/colors/white.dds"
+						color = { 1 0 0 1 }
+					}
+				}
+			}
+
+			# ---- R1: scrollarea 200x120, content 300x300 (clip probe) ----
+			text_single = {
+				position = { 660 232 }
+				raw_text = "R1: scrollarea"
+			}
+			widget = {
+				position = { 660 260 }
+				size = { 200 120 }
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.15 0.15 0.15 1 }
+				}
+
+				scrollarea = {
+					size = { 200 120 }
+
+					scrollwidget = {
+						widget = {
+							size = { 300 300 }
+							background = {
+								texture = "gfx/interface/colors/white.dds"
+								color = { 0.1 0.1 0.4 1 }
+							}
+							icon = {
+								position = { 0 0 }
+								size = { 20 20 }
+								texture = "gfx/interface/colors/white.dds"
+								color = { 1 0 0 1 }
+							}
+							icon = {
+								position = { 180 50 }
+								size = { 20 20 }
+								texture = "gfx/interface/colors/white.dds"
+								color = { 1 1 0 1 }
+							}
+							icon = {
+								position = { 280 280 }
+								size = { 20 20 }
+								texture = "gfx/interface/colors/white.dds"
+								color = { 0 1 0 1 }
+							}
+						}
+					}
+				}
+			}
+
+			# ---- S1: text_single with max_width = 60, ten Ms (elide probe) ----
+			text_single = {
+				position = { 20 432 }
+				raw_text = "S1: max_width 60"
+			}
+			text_single = {
+				position = { 20 460 }
+				max_width = 60
+				raw_text = "MMMMMMMMMM"
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.5 0 0.5 1 }
+				}
+			}
+
+			# ---- S2: multiline wrap: text_single + multiline + max_width 150 ----
+			text_single = {
+				position = { 200 432 }
+				raw_text = "S2: multiline 150"
+			}
+			text_single = {
+				position = { 200 460 }
+				multiline = yes
+				max_width = 150
+				raw_text = "MMMM MMMM MMMM MMMM"
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0 0.4 0.4 1 }
+				}
+			}
+
+			# ---- S3: fontsize 30, five Ms (metric scaling) ----
+			text_single = {
+				position = { 420 432 }
+				raw_text = "S3: fontsize 30"
+			}
+			text_single = {
+				position = { 420 460 }
+				fontsize = 30
+				raw_text = "MMMMM"
+				background = {
+					texture = "gfx/interface/colors/white.dds"
+					color = { 0.5 0 0.5 1 }
+				}
+			}
+		}
+	}
+}

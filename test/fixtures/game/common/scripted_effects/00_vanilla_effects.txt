@@ -1,0 +1,7 @@
+vanilla_only_effect = {
+	add_gold = 1
+}
+
+shared_effect = {
+	add_gold = 2
+}

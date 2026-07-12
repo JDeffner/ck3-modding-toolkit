@@ -1,0 +1,6 @@
+namespace = vanilla_ev
+
+vanilla_ev.1 = {
+	type = character_event
+	title = vanilla_ev.1.t
+}
