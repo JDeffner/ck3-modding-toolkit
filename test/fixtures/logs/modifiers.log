@@ -6,3 +6,12 @@ Tag: diplomacy
 Categories: character
 --------------------
 Tag: development_growth_factor, Categories: county
+--------------------
+Tag: $CULTURE$_opinion
+Use areas: character
+
+Tag: stationed_$MEN_AT_ARMS_TYPE$_damage_add
+Use areas: character
+
+Tag: dynasty_opinion
+Use areas: character

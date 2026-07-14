@@ -198,7 +198,9 @@ export function scanRoot(root: string, source: DefSource, opts: ScanOptions): De
 // ---------------------------------------------------------------------------
 
 // Bumped to 4 for §E doc/tags columns; a v3 cache is silently rejected and rebuilt.
-const INDEX_CACHE_FORMAT = 4;
+// Bumped to 5 when engine-layer (jomini) definitions joined the vanilla scan;
+// older caches lack them and must rebuild.
+const INDEX_CACHE_FORMAT = 5;
 
 /** Compact "absent" marker inside cache rows. */
 type Absent = 0;

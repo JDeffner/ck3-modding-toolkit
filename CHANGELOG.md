@@ -1,5 +1,229 @@
 # Changelog
 
+## 0.1.1 (alpha)
+
+First batch of fixes and features driven by community feedback on the 0.1.0
+alpha (Discord thread + first external testers).
+
+### Changed (the "primary mod" concept is gone)
+- **Every workspace mod is now a first-class mod.** Previously one mod (first
+  workspace folder, or `ck3.modPath`) was silently "the mod": only it fed the
+  sidebar views, missing-localization diagnostics, defines/text-format
+  layering, the schema overlay, playset.json and completion's mod-first
+  ranking; the other workspace mods were treated like read-only parents. All
+  of that is per-mod now. `ck3.modPath` remains only for working on a mod
+  folder that is not part of the workspace.
+- **Sidebar views follow the file you are editing.** Mod Overview,
+  Localization Coverage, Overrides & Conflicts, the event graph and the mod
+  report show the mod that owns the active editor's file; the view header
+  names it. `CK3: Pick Focus Mod` (button in the view headers) pins one mod
+  instead. Switching is instant: all mods are indexed once at launch, the
+  views only re-filter in-memory data.
+- **Overrides view sees mod-vs-mod conflicts.** When two of your workspace
+  mods define the same name, the view lists it with both mods' names and
+  notes that launcher load order decides.
+- **Tiger baselines are per mod.** `CK3 Tiger: Create Baseline` writes to the
+  active editor's mod, and each validation run applies that mod's baseline.
+- **Workspace mods can be excluded from indexing.** `CK3: Exclude Workspace
+  Mods from Indexing` shows a checklist of the detected mods; checked ones are
+  skipped entirely (no completion, navigation, diagnostics or views) until
+  re-included. Persisted per workspace in `ck3.excludedMods`. A new "Workspace
+  Mods" group at the top of the Tools view holds this picker, the focus-mod
+  picker (with the current focus shown inline) and the list of excluded mods.
+
+### Added (translation mods)
+- **`CK3 Localization: New Translation Mod`** scaffolds a language
+  compatibility mod for ANY indexed mod (workspace mod or read-only parent):
+  a `descriptor.mod` with the source mod as dependency, every source loc file
+  mirrored to `localization/<lang>/replace/` with blanked values (original
+  text kept as `# english: …` comments, so nothing wrong-language ever ships),
+  a playset.json so the new mod resolves the source's symbols when opened
+  alone, and a generated `TRANSLATE.md` with the workflow, a per-file
+  checklist and a ready-made AI translation prompt (verbatim rules for
+  `$variables$`, `[script]`, icons, formatting tags, register/terminology).
+  Progress is tracked by the Localization Coverage view (blank = untranslated).
+
+### Added (multi-mod usability)
+- **Hovers name the mod a definition comes from.** Origin labels in hover
+  cards, completion details and the Overrides view now show the owning mod's
+  launcher name from its `descriptor.mod` (`trait group revealed_realm ·
+  Cultivation Expanded`) instead of a generic "mod"/"parent". With 20 mods in
+  one workspace you can finally tell where a symbol lives at a glance. Mods
+  without a descriptor fall back to their folder name; vanilla stays
+  "vanilla". Labels refresh live when a descriptor changes.
+- **Settings reworked for clarity.** The settings page is now grouped
+  (Setup / Mods / Validation / Editor) with rewritten descriptions that lead
+  with the common case: leave everything empty, open your mod folder(s), run
+  Setup once. Machine paths (`ck3.gamePath`, `ck3.logsPath`, `ck3.tigerPath`,
+  `ck3.modPath`, `ck3.parentMods`) are machine-scoped so Settings Sync no
+  longer copies one computer's paths onto another. `ck3.tigerRunOn` got
+  per-option descriptions.
+- **Setup report reads like a playset.** `CK3: Run Setup & Health Check` now
+  lists the primary mod and every workspace/parent mod by descriptor name and
+  says what each group means (fully indexed and editable vs read-only
+  context).
+
+### Fixed (verified against real 1.19 dumps)
+- **`DumpDataTypes` parsing works on real dumps now.** The parser predated any
+  real dump and had three defects the first real one exposed: duplicate
+  entries (a typed `Promote` plus a `Function` returning `[unregistered]`)
+  let the worthless twin clobber the good one, breaking chain resolution for
+  basics like `GetPlayer.` and `Character.GetFather.`; the literal
+  `[unregistered]` leaked as a fake type name instead of falling back to the
+  member pool; and `Description:` prefixes plus "Jomini Script System"
+  boilerplate leaked into hovers. With the fixes a real dump lifts the data
+  from the bundled wiki baseline (2,139 members, 24 types) to 19,710 members
+  across 1,222 types.
+- **modifiers.log parses again on 1.19.** The game switched the dump to
+  blank-line-separated `Tag:` / `Use areas:` entries with no dashed
+  separators; the old parser collapsed the whole file into one garbage token
+  (silent since the format change). 590 concrete modifier tokens now load;
+  templated tags (`$CULTURE$_opinion`) feed the new lazy expansion (see
+  Added). Docs cache format bumped so existing caches reparse.
+
+### Added (engine-layer batch)
+- **Templated modifiers expand against your definitions.** modifiers.log dumps
+  ~150 templated tags (`$CULTURE$_opinion`,
+  `stationed_$MEN_AT_ARMS_TYPE$_damage_add`); concrete names like
+  `french_opinion` or `heavy_infantry_recruitment_cost_mult` now get hover
+  cards (template, source definition with file:line, use areas) and appear in
+  completion where modifier tokens are offered. Expansion is lazy (matched on
+  demand against the definition index), so AGOT-scale mods with thousands of
+  cultures cost nothing. Each of the 13 placeholder-to-definition-kind
+  mappings (plus the fixed men-at-arms base-type set) was verified against
+  vanilla 1.19 `modifier_definition_formats/` and script usage; unverifiable
+  placeholders (`$SUBJECT_SALARY$`, `$GEOGRAPHICAL_REGION$`, `$TRAIT_TRACK$`)
+  are deliberately not expanded, since a wrong expansion is worse than a
+  missing one.
+- **Defines IntelliSense.** `define:` completes the 149 `NNamespace` blocks and
+  `define:NNamespace|` completes that namespace's constants (2,100+ across
+  jomini + game + mod, harvested from `common/defines` at index time, mod
+  overrides game overrides engine). Hovering `define:NS|CONST` shows the
+  resolved value, the defining file and layer, and what it overrides.
+- **Localization format tags.** Typing `#` inside a loc value completes the
+  text-formatting tags (`#G`, `#P`, `#bold`, ... — 111 harvested from the
+  engine's `basetextformatting.gui`, the game layer, and the mod, with correct
+  first-in-only-served override semantics). Hover shows the format chain,
+  resolved color, and source file.
+- **Data-binding macros.** The engine's `data_binding/*.txt` macro functions
+  (`IsZero`, `Not`, ...) now appear in `[ ... ]` completion, signature help,
+  and hover in `.gui` and loc files, with their expansion documented.
+- **Engine layer indexed.** The `jomini` directory next to the game folder is
+  scanned as a lowest-priority vanilla root: engine-only content (logic
+  trigger localization, engine defines, base gui templates and text formats)
+  now resolves in navigation, completion, and the GUI preview. `clausewitz`
+  was audited and deliberately excluded (Paradox tooling only).
+- **Dependency Explorer.** New activity-bar view plus "CK3: Show Dependencies
+  of Definition at Cursor": for any definition (trait, scripted effect,
+  building, event, ...) it lists what references it and what it references,
+  grouped by kind, including bare-key scripted effect/trigger calls; click
+  jumps to the site.
+- **GUI preview phase 2.** Datamodel-driven lists render ghosted placeholder
+  rows of their item template instead of nothing; `spriteborder` textures
+  render as proper nine-slice (corners fixed, edges stretched one axis);
+  widget `state` blocks are confirmed excluded from the base-state layout.
+- **Live-pass harness.** `scripts/live-pass.ts` boots the locally installed
+  VS Code with an isolated profile against the real mod workspace and runs a
+  13-point checklist through the production client-server transport (first
+  ever live pass; all checks green on 2026-07-14).
+
+### Added (second feedback round)
+- **Scope inference: call-site aggregation.** Scripted effects, triggers,
+  values and modifiers without a CK3Doc `@scope` tag now root at the union of
+  the scopes statically resolved at their call sites, closing the largest
+  honest-unknown bucket from the 2026-07 audit. Measured with the audit
+  harness: cultivation mod unknown-scope rate 53.2% to 34.4% (4,775 sites),
+  AGOT 32.9% to 14.2% (807,284 sites). The `@scope` tag still wins;
+  unresolved call sites contribute nothing (no poisoning: an unresolvable
+  call site carries no scope information).
+- **Scope inference: cross-file saved scopes.** `scope:x` names saved in
+  another file now resolve: every save site is indexed with a static type
+  hint (the enclosing key chain for `save_scope_as`, the value expression for
+  `save_scope_value_as`, always `value` for `save_temporary_value_as`) and the
+  merged type is the fallback when the current file has no save site. The
+  hover card links up to three save sites instead of just saying "saved
+  elsewhere in the mod".
+- **Script-value math anywhere:** block-form math keys (`value`, `add`,
+  `min`, ...) now put completion into the script-value context in any file,
+  not just inside `ai_chance`/`ai_will_do`/weights, so math embedded in
+  effect arguments completes correctly; `save_temporary_value_as` joined the
+  math-key completion set and got hover documentation.
+- **DDS preview pan and zoom**: mouse wheel zooms at the cursor, middle-mouse
+  drag pans freely, pixels render crisply past 100%, and the toolbar buttons
+  (fit, 1:1) recenter properly.
+- **GUI preview free camera**: the layout preview is no longer pinned to the
+  top-left scroll origin. Middle-mouse pan works in every direction including
+  past the layout bounds, wheel zoom stays cursor-anchored, Fit centers the
+  layout, and the first render opens centered. Widget dragging stays
+  pixel-accurate under the new camera.
+- **The game installation can live in the workspace.** A workspace folder that
+  is a CK3 install (the `game` data dir or the install root) is detected via
+  engine markers, never treated as a mod (no bogus missing-descriptor
+  warning, no tiger runs against vanilla), and is adopted as the effective
+  `ck3.gamePath` when the setting is unset.
+- **.info reference navigation**: an editor-title button opens the game's
+  `_*.info` format doc relevant to the current file (hidden when none
+  applies), and inside an `.info` file a second button lists the vanilla
+  implementation files of that folder for one-click comparison.
+
+### Added
+- **Multi-mod workspaces are now first-class.** Users with 20+ mods open at
+  once (or one parent directory holding all their mod folders) get the full
+  treatment for every mod being edited, not just the first workspace folder:
+  - A workspace folder that merely *contains* mod folders expands to its child
+    mods automatically (same for an explicitly set `ck3.modPath`).
+  - References are indexed for every workspace mod, so find-references, usage
+    counts, and the event graph span the whole workspace.
+  - ck3-tiger validates the mod that owns the file you save (and the mod of
+    the active editor on manual runs), publishing per-mod diagnostics without
+    wiping other mods' results.
+  - Mod-targeted commands (new content, loc editing, translations,
+    tiger.conf) act on the mod of the active editor.
+  - Reference diagnostics, folder-layout checks and namespace tracking apply
+    per owning workspace mod.
+- **Call-site references**: key-position calls (`my_effect = yes`,
+  `my_trigger = { ... }`) are indexed as references — previously
+  find-references on a scripted effect/trigger only found value-position
+  mentions, i.e. usually nothing. Engine-token call sites (`add_gold`) stay
+  out of the index as a memory guard for AGOT-sized mods. Completion ranking
+  is unaffected: call sites are excluded from the usage-count signal (§C2).
+- **Clickable reference counts**: the "N references" footer on hover cards is
+  now a command link that opens the references peek at the hovered symbol
+  (feedback request: "see a list of all usages of that trigger and navigate
+  to them"). Find-references (Shift+F12) also works on loc-key lines inside
+  localization yml now.
+- **Navigate custom loc from localization strings**: F12 on
+  `Custom2('RelationToMe', ...)` (or any name inside a `[ ... ]` datafunction
+  expression) in a loc yml jumps to the `customizable_localization` (or other
+  indexed) definition. Quoted arguments prefer the custom-loc meaning when
+  names collide.
+- **Ad-hoc list item scopes**: `every_in_list = { list = X }` (and
+  any_/random_/ordered_) now infers the item scope from the mod-wide
+  `add_to_list` / `add_to_temporary_list` set-sites, statically resolved
+  through each site's enclosing key chain — including lists built in another
+  event or file. List hover cards show the item type
+  (`list X of character · mod`); conflicting set-sites stay unknown (AD-5,
+  annotate never guess).
+
+### Fixed
+- **`save_temporary_value_as` is a saved scope now** (script-value math): the
+  saved name types as a `value` scope, hover shows the in-file save site
+  instead of "unknown · saved elsewhere in the mod", and the site is indexed
+  for find-references/rename. Previously the entire family of
+  `scope:my_saved_value >= 20` comparisons showed unknown even when saved four
+  lines above.
+- **Data-function hover resolves members by name when the chain does not**:
+  `TaskContract.GetEmployer.GetPrimaryTitle` used to fall back to "member —
+  deduced from vanilla usage" even with a loaded dump, because one link in the
+  chain lacked a return type. The hover now scans the data-type tables for the
+  member name and shows the real signature ("function on `Character` —
+  matched by name"), listing other owning types when ambiguous.
+- **The DumpDataTypes hover footer no longer reads like an error when the
+  dump is already loaded.** Without a dump it now says the bundled wiki tables
+  are in use and how to upgrade; with one loaded it says the specific name is
+  not in the dump — previously the same static "Run `DumpDataTypes` …" line
+  covered both, reading as "your logs were not found".
+
 ## 0.1.0 (public alpha)
 
 First version to leave the dev machine, published as a Marketplace

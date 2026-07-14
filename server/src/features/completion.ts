@@ -49,6 +49,7 @@ import { emptyFreqData } from "../../../shared/src/schema/freqs";
 import { isLocProperty } from "../../../shared/src/locProperties";
 import type { ServerData } from "../serverData";
 import type { SchemaData } from "../schema/loader";
+import { expandModifierTemplates, matchTemplatedModifier, templatedModifierDoc } from "../data/modifierTemplates";
 import { detectContextFromParse, blockStackFromParse, type BlockContext } from "../context";
 import { structureContextAt } from "../structure";
 import type { ParseResult } from "../parser";
@@ -56,6 +57,8 @@ import { getParse, getSavedScopes } from "../parseCache";
 import { inferScopeAt } from "../scopes/inference";
 import { inferenceContextFor, variableTypes } from "../scopes/varTypes";
 import type { Scope } from "../scopes/model";
+import type { Ck3Settings } from "../../../shared/src/protocol";
+import { assetDirContext, provideAssetDirCompletion, provideBareNameCompletion } from "./assetPaths";
 
 /** Cap on items per response; the client re-queries per keystroke (isIncomplete). */
 export const MAX_ITEMS = 1000;
@@ -143,9 +146,9 @@ function tokenItem(t: TokenData): CompletionItem {
   return item;
 }
 
-function defItem(d: Definition): CompletionItem {
+function defItem(d: Definition, origin: string = d.source): CompletionItem {
   const item: CompletionItem = { label: d.name, kind: DEF_ITEM_KINDS[d.kind] ?? CompletionItemKind.Reference };
-  item.detail = `${d.kind.replace(/_/g, " ")} (${d.source})`;
+  item.detail = `${d.kind.replace(/_/g, " ")} (${origin})`;
   item.data = { t: "def", k: d.kind, n: d.name };
   return item;
 }
@@ -216,11 +219,16 @@ function isSubsequence(wordLow: string, wordPos: number, labelLow: string, label
 const VALUE_POSITION = /([A-Za-z_][A-Za-z0-9_.\-]*)\s*\??=\s*"?([A-Za-z0-9_.\-]*)$/;
 /** Any `prefix:name` being typed; dispatching on the prefix happens in provide(). */
 const PREFIX_POSITION = /([A-Za-z_][A-Za-z0-9_]*):([A-Za-z0-9_.\-]*)$/;
+/** `define:NS|CONST` (pipe separator): group 1 namespace, group 2 present when a
+ * `|` was typed, group 3 the constant. Handled ahead of PREFIX_POSITION because
+ * the pipe form is not a plain `prefix:name`. */
+const DEFINE_POSITION = /(?:^|[^A-Za-z0-9_])define:([A-Za-z0-9_]*)(\|([A-Za-z0-9_]*))?$/;
 /** The word being typed at the cursor (mirrors the language's wordPattern). */
 const WORD_AT_END = /[A-Za-z0-9_][A-Za-z0-9_.\-]*$/;
 
-/** Prefixes that reference freeform names (no index kind): offer nothing. */
-const FREEFORM_PREFIXES = new Set(["flag", "define", "event_target", "list"]);
+/** Prefixes that reference freeform names (no index kind): offer nothing.
+ * `define` is handled separately (its pipe form completes namespaces/constants). */
+const FREEFORM_PREFIXES = new Set(["flag", "event_target", "list"]);
 
 /** Cached per-context base items with the metadata needed to rank per request. */
 interface BaseItems {
@@ -236,6 +244,8 @@ export class CompletionFeature {
   private cacheRevision = -1;
   /** Bundled per-context frequency tables (§C3); empty until setFreqs / fail-soft. */
   private freqs: FreqData = emptyFreqData();
+  /** Content roots for filesystem-backed asset-path completion; null until pushed. */
+  private settings: Ck3Settings | null = null;
 
   constructor(
     private readonly data: ServerData,
@@ -250,6 +260,11 @@ export class CompletionFeature {
   setFreqs(freqs: FreqData): void {
     this.freqs = freqs;
     this.cache.clear();
+  }
+
+  /** Push the resolved settings (paths) used for asset-path completion. */
+  setSettings(settings: Ck3Settings): void {
+    this.settings = settings;
   }
 
   /**
@@ -279,6 +294,21 @@ export class CompletionFeature {
       start: { line: pos.line, character: 0 },
       end: { line: pos.line, character: pos.character },
     });
+
+    // `define:NS|CONST` (pipe form) → namespaces, then that namespace's constants.
+    const defineMatch = DEFINE_POSITION.exec(linePrefix);
+    if (defineMatch) {
+      if (defineMatch[2] === undefined) return finalize(this.defineNamespaceItems(), defineMatch[1], limit);
+      return finalize(this.defineConstantItems(defineMatch[1]), defineMatch[3], limit);
+    }
+
+    // Quoted/unquoted asset path (`icon = "gfx/interface/ico`) → directory drill-down.
+    if (this.settings) {
+      const assetPath = assetDirContext(linePrefix);
+      if (assetPath !== null) return provideAssetDirCompletion(this.settings, assetPath);
+    }
+    // A stray "/" outside a path context must not fall through to the key soup.
+    if (linePrefix.endsWith("/")) return { isIncomplete: false, items: [] };
 
     // `prefix:name` → saved scopes, variables, or index kinds via schema.prefixRefs.
     const prefixMatch = PREFIX_POSITION.exec(linePrefix);
@@ -437,6 +467,11 @@ export class CompletionFeature {
       if (token?.doc) item.documentation = token.doc;
       return item;
     }
+    if (data.t === "tmpl") {
+      const m = matchTemplatedModifier(data.n, this.data.modifierTemplates, (n) => this.data.index.lookup(n));
+      if (m) item.documentation = { kind: MarkupKind.Markdown, value: templatedModifierDoc(m) };
+      return item;
+    }
     if (data.t === "def") {
       const def = this.data.index.lookup(data.n).find((d) => d.kind === data.k);
       if (def) {
@@ -523,7 +558,7 @@ export class CompletionFeature {
           items.push({
             label,
             kind: prefix === "any" ? CompletionItemKind.Function : CompletionItemKind.Method,
-            detail: `scripted list iterator${targets ? ` (${[...targets].join(", ")})` : ""} · ${d.source}`,
+            detail: `scripted list iterator${targets ? ` (${[...targets].join(", ")})` : ""} · ${this.data.originLabel(d)}`,
             data: { t: "def", k: "scripted_list", n: d.name },
           });
           tokens.push(null);
@@ -531,10 +566,28 @@ export class CompletionFeature {
         }
       }
     }
+    // Templated modifiers ($CULTURE$_opinion → french_opinion) expand against
+    // the definition index, but only where modifier tokens are offered at all
+    // (unknown context, per the kind filters above). Rebuilt with this cache
+    // per index revision — never materialized into tokenMap.
+    if (context === "unknown") {
+      for (const e of expandModifierTemplates(this.data.modifierTemplates, this.data.index, this.data.completableKinds)) {
+        if (byLabel.has(e.name)) continue; // a concrete dumped modifier wins
+        byLabel.set(e.name, items.length);
+        items.push({
+          label: e.name,
+          kind: CompletionItemKind.Property,
+          detail: `modifier · from ${e.template.name}`,
+          data: { t: "tmpl", n: e.name },
+        });
+        tokens.push(null);
+        sources.push(e.def?.source ?? "vanilla");
+      }
+    }
     for (const d of this.data.index.entries((def) => this.defAllowed(def, context))) {
       if (byLabel.has(d.name)) continue; // engine token shadows a same-name def
       byLabel.set(d.name, items.length);
-      items.push(defItem(d));
+      items.push(defItem(d, this.data.originLabel(d)));
       tokens.push(null);
       sources.push(d.source);
     }
@@ -570,6 +623,13 @@ export class CompletionFeature {
     offset: number,
     entry: Ck3SchemaEntry | null
   ): CompletionItem[] {
+    // Bare-filename `.dds` field (trait icon, death-reason icon, building type_icon):
+    // list *.dds from the engine-fixed base dirs across roots, mod-first.
+    if (this.settings) {
+      const bare = provideBareNameCompletion(this.settings, entry?.kind, key);
+      if (bare) return bare;
+    }
+
     const schema = this.getSchema();
     let field = schema.refFields.get(key);
     // Keys too generic for a global ref field (`id`, `reference`, `variable`)
@@ -627,7 +687,7 @@ export class CompletionFeature {
       if (seen.has(d.name)) continue;
       const f = freqBucket(this.mergedCount(d.name, null));
       const s = d.source === "mod" ? SRC_MOD : SRC_OTHER;
-      items.push({ ...defItem(d), sortText: TIER_NEUTRAL + f + s + d.name });
+      items.push({ ...defItem(d, this.data.originLabel(d)), sortText: TIER_NEUTRAL + f + s + d.name });
     }
     return items;
   }
@@ -639,7 +699,7 @@ export class CompletionFeature {
     for (const d of this.data.index.entries((def) => kinds.has(def.kind))) {
       const f = freqBucket(this.mergedCount(d.name, null));
       const s = d.source === "mod" ? SRC_MOD : SRC_OTHER;
-      items.push({ ...defItem(d), sortText: TIER_VALID + f + s + d.name });
+      items.push({ ...defItem(d, this.data.originLabel(d)), sortText: TIER_VALID + f + s + d.name });
     }
     return items;
   }
@@ -648,7 +708,7 @@ export class CompletionFeature {
   private modLocItems(): CompletionItem[] {
     const items: CompletionItem[] = [];
     for (const d of this.data.index.entries((def) => def.kind === "loc_key" && def.source === "mod")) {
-      items.push({ ...defItem(d), sortText: TIER_VALID + "50" + SRC_MOD + d.name });
+      items.push({ ...defItem(d, this.data.originLabel(d)), sortText: TIER_VALID + "50" + SRC_MOD + d.name });
     }
     return items;
   }
@@ -671,6 +731,26 @@ export class CompletionFeature {
     if (!field || (field.form !== "list" && field.form !== "both")) return null;
     if (innermost === "first_valid" && entry?.kind !== "on_action") return null;
     return this.refFieldItems(field);
+  }
+
+  /** `define:` → engine/game/mod define namespaces (alphabetical). */
+  private defineNamespaceItems(): CompletionItem[] {
+    return this.data.defines.namespaces().map((ns) => ({
+      label: ns,
+      kind: CompletionItemKind.Module,
+      detail: "define namespace",
+      sortText: ns.toLowerCase(),
+    }));
+  }
+
+  /** `define:NS|` → that namespace's constants, detail = the resolved value. */
+  private defineConstantItems(namespace: string): CompletionItem[] {
+    return this.data.defines.constants(namespace).map((c) => ({
+      label: c.name,
+      kind: CompletionItemKind.Constant,
+      detail: `= ${c.value}`,
+      sortText: c.name.toLowerCase(),
+    }));
   }
 
   /**
@@ -743,7 +823,7 @@ export class CompletionFeature {
       for (const d of this.data.index.entries((def) => wanted.has(def.kind))) {
         const f = freqBucket(this.mergedCount(d.name, null));
         const s = d.source === "mod" ? SRC_MOD : SRC_OTHER;
-        items.push({ ...defItem(d), sortText: TIER_VALID + f + s + d.name });
+        items.push({ ...defItem(d, this.data.originLabel(d)), sortText: TIER_VALID + f + s + d.name });
       }
       return items;
     }
@@ -808,6 +888,9 @@ const VALUE_MATH_KEYS: Array<[key: string, doc: string]> = [
   ["subtract", "Subtract from the running value."],
   ["compare_modifier", "Scaled modifier from comparing a value (target, multiplier, step)."],
   ["opinion_modifier", "Scaled modifier from an opinion (who, opinion_target, multiplier)."],
+  ["save_temporary_value_as", "Save the running value under a name; read it back as scope:<name>."],
+  ["fixed_range", "Uniformly random value between min and max."],
+  ["integer_range", "Uniformly random integer between min and max."],
   ["desc", "Custom description shown in the value breakdown tooltip."],
   ["round", "Round to the nearest integer (yes/no)."],
   ["floor", "Round down (yes/no)."],

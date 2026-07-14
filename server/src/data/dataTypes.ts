@@ -24,7 +24,7 @@ export interface DataTypeMember {
   /** Description prose from the dump, when the entry carries one. */
   desc?: string;
   /** Which source produced this entry (provenance shown in hovers). */
-  src?: "wiki" | "dump";
+  src?: "wiki" | "dump" | "macro";
 }
 
 export interface DataTypesData {
@@ -108,8 +108,11 @@ export function parseDataTypesDump(text: string, into?: DataTypesData): DataType
         ret = rt[1].trim();
         continue;
       }
-      // Some dump entries carry free prose (a description) on extra lines.
-      if (line.trim().length > 0) descLines.push(line.trim());
+      // Descriptions come as "Description: ..." lines; older dumps used bare
+      // prose. Either way, strip the prefix and keep the text. A dash run is
+      // a separator (reachable here when the file lacks a trailing newline).
+      const prose = line.trim().replace(/^Description:\s*/, "");
+      if (prose.length > 0 && !/^-{4,}$/.test(prose)) descLines.push(prose);
     }
     if (!defType) continue;
     const kind = /promote/i.test(defType) ? "promote" : "function";
@@ -129,23 +132,55 @@ export function parseDataTypesDump(text: string, into?: DataTypesData): DataType
     }
     if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(signature)) continue;
 
-    const member: DataTypeMember = { ret: ret === "void" ? null : ret, args, kind, src: "dump" };
+    // "[unregistered]" is the dump's "no registered return type" marker — a
+    // null ret (fallback completion) beats a bogus type name (dead chain).
+    const member: DataTypeMember = {
+      ret: ret === "void" || ret === "[unregistered]" ? null : ret,
+      args,
+      kind,
+      src: "dump",
+    };
     const desc = descLines.join(" ").slice(0, 300);
-    if (desc.length > 0) member.desc = desc;
+    // "Jomini Script System" is per-entry boilerplate, not a description.
+    if (desc.length > 0 && desc !== "Jomini Script System") member.desc = desc;
     const isGlobal = /^Global/i.test(defType);
     const dot = signature.indexOf(".");
     if (!isGlobal && dot > 0) {
       const owner = signature.slice(0, dot);
       const name = signature.slice(dot + 1);
       if (name.length === 0 || name.includes(".")) continue;
-      typeMembers(data, owner).set(name, member);
-      data.count++;
+      insertMember(data, typeMembers(data, owner), name, member);
     } else if (isGlobal && dot < 0) {
-      data.globals.set(signature, member);
-      data.count++;
+      insertMember(data, data.globals, signature, member);
     }
   }
   return data;
+}
+
+/**
+ * Insert a dump entry without losing information: the dump lists some members
+ * twice (e.g. `Character.GetFather` once as a Promote with a real return type
+ * and once as a Function returning "[unregistered]"), and the wiki baseline
+ * may already hold a typed entry. An entry with a known return type is never
+ * clobbered by one without; desc/args fill in whichever survivor lacks them.
+ */
+function insertMember(
+  data: DataTypesData,
+  map: Map<string, DataTypeMember>,
+  name: string,
+  member: DataTypeMember
+): void {
+  const prev = map.get(name);
+  if (!prev) {
+    map.set(name, member);
+    data.count++;
+    return;
+  }
+  const keep = prev.ret !== null && member.ret === null ? prev : member;
+  const other = keep === prev ? member : prev;
+  if (!keep.desc && other.desc) keep.desc = other.desc;
+  if (!keep.args && other.args) keep.args = other.args;
+  map.set(name, keep);
 }
 
 /**

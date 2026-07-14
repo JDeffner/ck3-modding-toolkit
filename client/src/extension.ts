@@ -12,7 +12,7 @@ import {
   type LanguageClientOptions,
   type ServerOptions,
 } from "vscode-languageclient/node";
-import { readConfig, type Ck3Config } from "./config";
+import { modRootFor, readConfig, type Ck3Config } from "./config";
 import { ensureFileAssociations, wireLanguageDetection } from "./languageMode";
 import { findDownloadedTiger } from "./tigerDownload";
 import { downloadTigerCommand, maybeNudgeSetup, runSetup, type SetupDeps } from "./setup";
@@ -28,7 +28,8 @@ import {
 } from "./locCommands";
 import { LocFileDefinitionProvider, LocReferenceTracker, jumpToScriptReference } from "./locNavigation";
 import { createTranslationCommand } from "./translation";
-import { openInfoDocsCommand } from "./infoDocs";
+import { createTranslationModCommand } from "./translationMod";
+import { openInfoDocsCommand, openVanillaExamplesCommand, updateInfoDocContext } from "./infoDocs";
 import { registerCk3Views } from "./views";
 import { EventGraphPanel } from "./webviews/eventGraph/panel";
 import { GuiTreePanel } from "./webviews/guiTree/panel";
@@ -70,6 +71,9 @@ import {
   guiWidgetEditRequest,
   type GuiWidgetEditParams,
   type GuiWidgetEditResult,
+  dependenciesRequest,
+  type DependenciesParams,
+  type DependenciesResult,
 } from "../../shared/src/protocol";
 import type { IndexStats } from "../../shared/src/types";
 
@@ -89,6 +93,7 @@ function toSettings(c: Ck3Config): Ck3Settings {
     logsPath: c.logsPath,
     modPath: c.modPath,
     parentPaths: c.parentPaths,
+    workspaceMods: c.workspaceMods,
     locLanguage: c.locLanguage,
     scopeInlayHints: c.scopeInlayHints,
     diagnosticsIgnore: c.diagnosticsIgnore,
@@ -117,8 +122,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
   log(
     `activated. gamePath=${cfg.gamePath ?? "(none)"} logsPath=${cfg.logsPath ?? "(none)"} ` +
-      `modPath=${cfg.modPath ?? "(none)"} parents=${cfg.parentPaths.length} tigerPath=${cfg.tigerPath ?? "(none)"}`
+      `modPath=${cfg.modPath ?? "(none)"} workspaceMods=${cfg.workspaceMods.length} ` +
+      `parents=${cfg.parentPaths.length} tigerPath=${cfg.tigerPath ?? "(none)"}`
   );
+
+  // Multi-mod workspaces: mod-targeted commands act on the mod that owns the
+  // active editor's file, falling back to the primary mod folder.
+  const cfgForActive = (): Ck3Config => {
+    const file = vscode.window.activeTextEditor?.document.uri.fsPath;
+    const root = file ? modRootFor(file, cfg) : null;
+    return root && root !== cfg.modPath ? { ...cfg, modPath: root } : cfg;
+  };
 
   const reapplyLanguages = wireLanguageDetection(context, () => cfg);
   void ensureFileAssociations(cfg);
@@ -144,11 +158,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   updateStatus();
 
-  const baselineFile = () => (cfg.modPath ? path.join(cfg.modPath, ".ck3modding", "tiger-baseline.json") : null);
+  // Baselines are per mod (multi-mod workspaces): each run suppresses the
+  // baseline of the mod it validates, not one global file.
+  const baselineFileFor = (root: string | null) =>
+    root ? path.join(root, ".ck3modding", "tiger-baseline.json") : null;
   let tigerUnusedOnce = false;
-  const tigerExtraArgs = (): string[] => {
+  const tigerExtraArgs = (modRoot: string): string[] => {
     const args: string[] = [];
-    const bl = baselineFile();
+    const bl = baselineFileFor(modRoot);
     if (context.workspaceState.get<boolean>("ck3.tigerBaselineEnabled") && bl && fs.existsSync(bl)) {
       args.push("--suppress", bl);
     }
@@ -195,6 +212,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // kind badges and scope pills. Opt in to the HTML subset; content degrades to
     // plain markdown on clients that strip it (client.js sanitizes, default off).
     markdown: { supportHtml: true },
+    middleware: {
+      // Hover markdown arrives untrusted, which strips command: links. Trust
+      // exactly the one command our cards emit ("N references").
+      provideHover: async (document, position, token, next) => {
+        const hover = await next(document, position, token);
+        if (hover) {
+          for (const content of hover.contents) {
+            if (content instanceof vscode.MarkdownString) {
+              content.isTrusted = { enabledCommands: ["ck3.showReferences"] };
+            }
+          }
+        }
+        return hover;
+      },
+    },
   };
   const lc = new LanguageClient("ck3", "CK3 Modding", serverOptions, clientOptions);
   client = lc;
@@ -223,8 +255,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     modWatchers = [];
     for (const root of [cfg.modPath, ...cfg.parentPaths]) {
       if (!root) continue;
+      // .mod included so origin labels (descriptor name= in hovers) stay fresh.
       const w = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(vscode.Uri.file(root), "**/*.{txt,yml,gui}")
+        new vscode.RelativePattern(vscode.Uri.file(root), "**/*.{txt,yml,gui,mod}")
       );
       w.onDidChange((uri) => notifyModFileChanged(uri.fsPath));
       w.onDidCreate((uri) => notifyModFileChanged(uri.fsPath));
@@ -245,6 +278,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       cfg = resolveConfig();
       tiger.resetErrorNotice();
       updateStatus();
+      updateInfoDocContext(cfg);
       if (watchedRoots(cfg) !== oldRoots) {
         wireModWatcher();
         reapplyLanguages();
@@ -262,6 +296,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       cfg = resolveConfig();
       updateStatus();
+      updateInfoDocContext(cfg);
       wireModWatcher();
       reapplyLanguages();
       descriptorFeature.refresh();
@@ -277,6 +312,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.languages.registerDefinitionProvider(LOC_SELECTOR, new LocFileDefinitionProvider(tracker, () => cfg))
   );
 
+  // Title button "Open .info Reference" shows only when the active file maps to
+  // a game folder that has a relevant _*.info doc.
+  updateInfoDocContext(cfg);
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(() => updateInfoDocContext(cfg))
+  );
+
   // ---- commands ---------------------------------------------------------------
 
   context.subscriptions.push(
@@ -290,15 +332,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       output.show(true);
     }),
     vscode.commands.registerCommand("ck3.runTiger", () => tiger.run(true)),
+    // Target of the "N references" hover link: open the references peek for
+    // the hovered site (the LSP reference provider supplies the locations).
+    vscode.commands.registerCommand(
+      "ck3.showReferences",
+      async (uriStr: string, line: number, character: number) => {
+        const uri = vscode.Uri.parse(uriStr);
+        const position = new vscode.Position(line, character);
+        const locations =
+          (await vscode.commands.executeCommand<vscode.Location[]>(
+            "vscode.executeReferenceProvider",
+            uri,
+            position
+          )) ?? [];
+        await vscode.commands.executeCommand("editor.action.showReferences", uri, position, locations);
+      }
+    ),
     vscode.commands.registerCommand("ck3.editLocalization", (arg?: unknown) =>
-      editLocalizationCommand(lookupLoc, cfg, notifyModFileChanged, arg)
+      editLocalizationCommand(lookupLoc, cfgForActive(), notifyModFileChanged, arg)
     ),
     vscode.commands.registerCommand("ck3.openLocalizationSideBySide", (arg?: unknown) =>
       openLocalizationSideBySide(lookupLoc, arg)
     ),
     vscode.commands.registerCommand("ck3.jumpToScriptReference", () => jumpToScriptReference(tracker, cfg)),
-    vscode.commands.registerCommand("ck3.createTranslation", () => createTranslationCommand(cfg, log)),
+    vscode.commands.registerCommand("ck3.createTranslation", () => createTranslationCommand(cfgForActive(), log)),
+    vscode.commands.registerCommand("ck3.createTranslationMod", () => createTranslationModCommand(cfg, log)),
     vscode.commands.registerCommand("ck3.openInfoDocs", () => openInfoDocsCommand(cfg)),
+    vscode.commands.registerCommand("ck3.openVanillaExamples", () => openVanillaExamplesCommand()),
     vscode.commands.registerCommand("ck3.convertToDds", (arg?: vscode.Uri, multi?: vscode.Uri[]) =>
       convertToDdsCommand(arg, multi)
     ),
@@ -319,8 +379,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ---- overview suite --------------------------------------------------------
 
-  const views = registerCk3Views(context, lc);
-  const fetchGraph = (params: EventGraphParams) => lc.sendRequest<EventGraph>(eventGraphRequest, params);
+  const views = registerCk3Views(context, lc, () => cfg);
+  // Event-graph fetches carry the focus mod (unless a call already scoped it),
+  // so the graph shows the mod the sidebar shows.
+  const fetchGraph = (params: EventGraphParams) =>
+    lc.sendRequest<EventGraph>(eventGraphRequest, { modRoot: views.focusRoot(), ...params });
   // Inspector actions: loc writes reuse the BOM-correct edit machinery; the
   // option scaffold inserts before the event's closing brace and creates loc.
   const graphActions = {
@@ -350,14 +413,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!(await vscode.workspace.applyEdit(edit))) throw new Error("edit rejected");
       await doc.save();
       notifyModFileChanged(file);
-      if (cfg.modPath) {
-        const locFile = upsertNewModLoc(cfg, optionKey, "New option");
+      // The loc key belongs to the mod that owns the event file (multi-mod).
+      const owner = modRootFor(file, cfg);
+      const locCfg = owner && owner !== cfg.modPath ? { ...cfg, modPath: owner } : cfg;
+      if (locCfg.modPath) {
+        const locFile = upsertNewModLoc(locCfg, optionKey, "New option");
         notifyModFileChanged(locFile);
       }
     },
   };
   context.subscriptions.push(
     vscode.commands.registerCommand("ck3.refreshViews", () => views.refreshAll()),
+    vscode.commands.registerCommand("ck3.showDependencies", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== "paradox") {
+        void vscode.window.showWarningMessage("CK3: place the cursor on a definition in a script (.txt) file.");
+        return;
+      }
+      const params: DependenciesParams = {
+        uri: editor.document.uri.toString(),
+        position: {
+          line: editor.selection.active.line,
+          character: editor.selection.active.character,
+        },
+      };
+      const result = await lc.sendRequest<DependenciesResult>(dependenciesRequest, params);
+      views.showDependencies(result);
+      await vscode.commands.executeCommand("ck3.dependencies.focus");
+      if (!result.def) {
+        void vscode.window.showInformationMessage(
+          "CK3: no indexed definition under the cursor."
+        );
+      }
+    }),
     vscode.commands.registerCommand("ck3.showEventGraph", () => {
       // Seed the graph from where the user is: the event id under the cursor,
       // an on_action/decision name in the matching folders, or the file's
@@ -415,13 +503,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             values,
           } satisfies GuiWidgetEditParams),
         editor.document,
-        { gamePath: cfg.gamePath, modPath: cfg.modPath }
+        // Textures resolve against the mod that owns the previewed .gui file.
+        { gamePath: cfg.gamePath, modPath: modRootFor(editor.document.uri.fsPath, cfg) ?? cfg.modPath }
       );
     }),
-    vscode.commands.registerCommand("ck3.modReport", () => modReportCommand(lc)),
-    vscode.commands.registerCommand("ck3.tigerGenerateConf", () => generateTigerConfCommand(cfg)),
+    vscode.commands.registerCommand("ck3.modReport", () => modReportCommand(lc, views.focusRoot())),
+    vscode.commands.registerCommand("ck3.tigerGenerateConf", () => generateTigerConfCommand(cfgForActive())),
     vscode.commands.registerCommand("ck3.tigerCreateBaseline", async () => {
-      const bl = baselineFile();
+      // The baseline belongs to the mod of the active editor (multi-mod).
+      const bl = baselineFileFor(cfgForActive().modPath);
       if (!bl) {
         void vscode.window.showWarningMessage("CK3: no mod folder.");
         return;
@@ -458,8 +548,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("ck3.watchErrorLog", () => errorLog.toggle()),
     vscode.commands.registerCommand("ck3.launchGame", () => launchGameDebugCommand()),
-    vscode.commands.registerCommand("ck3.translateNext", () => translateNextCommand(lc, cfg, notifyModFileChanged)),
-    vscode.commands.registerCommand("ck3.newContent", () => newContentCommand(cfg, notifyModFileChanged))
+    vscode.commands.registerCommand("ck3.translateNext", () =>
+      translateNextCommand(lc, cfgForActive(), notifyModFileChanged)
+    ),
+    vscode.commands.registerCommand("ck3.newContent", () => newContentCommand(cfgForActive(), notifyModFileChanged))
   );
 
   // ---- onboarding ---------------------------------------------------------------

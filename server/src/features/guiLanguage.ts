@@ -23,6 +23,8 @@ import {
 import { wordRangeAt } from "../wordAt";
 import { getLineText } from "../documents";
 import { renderCard, renderHover } from "./hoverRender";
+import { assetDirContext, provideAssetDirCompletion } from "./assetPaths";
+import type { Ck3Settings } from "../../../shared/src/protocol";
 import * as path from "path";
 import { URI } from "vscode-uri";
 
@@ -33,8 +35,16 @@ interface GuiTypeInfo {
 interface GuiSchemaShape {
   types: Record<string, GuiTypeInfo>;
   globalProps: Record<string, number>;
+  /** Property key → its bounded set of enum-like scalar values (harvested). */
+  enums: Record<string, string[]>;
+  /** Enum keys observed with `|`-combined values (top|left, alphamask|…). */
+  enumCombinable: string[];
 }
 const GUI: GuiSchemaShape = GUI_SCHEMA_JSON as unknown as GuiSchemaShape;
+const ENUM_COMBINABLE = new Set(GUI.enumCombinable ?? []);
+
+/** `key = a|b|par` in a value position: key + the value text typed so far. */
+const ENUM_VALUE_POSITION = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z0-9_|]*)$/;
 
 const TIER_PROP = "0";
 const TIER_TYPE = "2";
@@ -53,10 +63,39 @@ function enclosingType(document: TextDocument, offset: number): string | null {
   return named.length > 0 ? named[named.length - 1].toLowerCase() : null;
 }
 
+/**
+ * Value-side completion for an enum-valued gui property. Returns null when the
+ * line is not `enumKey = …`. After a `|` only the segment being typed is
+ * completed and flags already in the combination are dropped from the list.
+ */
+function provideEnumCompletion(linePrefix: string): CompletionResult | null {
+  const m = ENUM_VALUE_POSITION.exec(linePrefix);
+  if (!m) return null;
+  const key = m[1].toLowerCase();
+  const values = GUI.enums?.[key];
+  if (!values) return null;
+  const segments = m[2].split("|");
+  const partial = segments[segments.length - 1];
+  const used = new Set(segments.slice(0, -1).map((s) => s.toLowerCase()));
+  const combinable = ENUM_COMBINABLE.has(key);
+  const items: CompletionItem[] = [];
+  values.forEach((v, i) => {
+    if (used.has(v)) return;
+    items.push({
+      label: v,
+      kind: CompletionItemKind.EnumMember,
+      detail: `${key} value${combinable ? " · combine with |" : ""}`,
+      sortText: TIER_PROP + rank2(i) + v,
+    });
+  });
+  return finalize(items, partial, MAX_ITEMS);
+}
+
 export function provideGuiCompletion(
   data: ServerData,
   document: TextDocument,
-  offset: number
+  offset: number,
+  settings?: Ck3Settings
 ): CompletionResult {
   const { lineIndex } = getParse(document);
   const pos = lineIndex.positionAt(offset);
@@ -66,8 +105,16 @@ export function provideGuiCompletion(
   });
 
   // Inside a [ ... ] datafunction expression → data types / promotes / functions.
-  const dataFn = provideDataFnCompletion(data.dataTypes, data.dataFnUsage, linePrefix);
+  const dataFn = provideDataFnCompletion(data.dataTypes, data.dataFnUsage, linePrefix, data.index);
   if (dataFn !== null) return dataFn;
+
+  // Quoted asset path (`texture = "gfx/interface/ico`) → directory-segment drill-down.
+  if (settings) {
+    const assetPath = assetDirContext(linePrefix);
+    if (assetPath !== null) return provideAssetDirCompletion(settings, assetPath);
+  }
+  // A stray "/" that is not a path context must not spam the widget list.
+  if (linePrefix.endsWith("/")) return { isIncomplete: false, items: [] };
 
   // `using = |` → templates (mod first, then vanilla).
   const valueMatch = VALUE_POSITION.exec(linePrefix);
@@ -86,6 +133,15 @@ export function provideGuiCompletion(
       }
       return finalize(items, valueMatch[2], MAX_ITEMS);
     }
+  }
+
+  // Enum-valued property (`parentanchor = top|hc`): complete the segment after
+  // the last `|`, excluding flags already present in the combination. Runs even
+  // when VALUE_POSITION misses (its regex stops at `|`).
+  const enumResult = provideEnumCompletion(linePrefix);
+  if (enumResult !== null) return enumResult;
+
+  if (valueMatch) {
     // Literal values (numbers, "[data functions]", texture paths): nothing to offer.
     return { isIncomplete: false, items: [] };
   }
@@ -179,6 +235,27 @@ export function provideGuiHover(
     );
   }
 
+  // Enum value token (`parentanchor = top|left`): the hovered word is a value
+  // belonging to an enum property named on the same line.
+  const enumKey = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(lineText)?.[1]?.toLowerCase();
+  if (enumKey && enumKey !== lower) {
+    const values = GUI.enums?.[enumKey];
+    if (values && values.includes(lower)) {
+      const combinable = ENUM_COMBINABLE.has(enumKey);
+      cards.push(
+        renderCard({
+          kind: "keyword",
+          badgeLabel: "gui enum value",
+          name: lower,
+          headTail: `of \`${enumKey}\``,
+          doc:
+            `Allowed: ${values.map((v) => `\`${v}\``).join(" ")}` +
+            (combinable ? "\n\nCombine flags with `|` (e.g. `top|left`)." : "."),
+        })
+      );
+    }
+  }
+
   const enclosing = enclosingType(document, offset);
   const encInfo = enclosing ? GUI.types[enclosing] : null;
   const propCount = encInfo?.props[lower] ?? GUI.globalProps[lower];
@@ -243,7 +320,7 @@ export function provideGuiHover(
           kind: "gui_type",
           badgeLabel: "template / type",
           name: def.name,
-          headTail: `· ${def.source}`,
+          headTail: `· ${data.originLabel(def)}`,
           footer: [link],
         })
       );

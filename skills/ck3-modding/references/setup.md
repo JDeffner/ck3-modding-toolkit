@@ -70,6 +70,29 @@ Set via Steam → Properties → Launch Options.
 - Mods don't invalidate ironman; checksum (main menu, bottom-right) matters for multiplayer —
   all players need identical mods and load order.
 
+## Engine file layering (clausewitz → jomini → game → mod)
+
+`<game>` is only the top layer of vanilla. The install root (the folder containing `<game>`) also
+holds two engine layers that load *before* it: `clausewitz/` (lowest) and `jomini/`. Effective
+resolution order is **clausewitz → jomini → game → mod**; a later layer overrides an earlier one,
+exactly like a mod overrides `game/`. Your mod can override jomini/clausewitz definitions too.
+
+**`jomini/` — engine content modders actually use** (grep it, not just `game/`):
+
+| What | Where |
+|---|---|
+| Base text-formatting tags (`#G #R #Y #I #X #V #N #P #Z #T #S #D`) used in loc/tooltips | `jomini/gui/jomini/basetextformatting.gui` |
+| Engine defines — including files that exist *only* here: camera, icons, lobby, multiplayer, settings, social | `jomini/common/defines/` (map-level in `defines/jomini/`) |
+| Logic-trigger localization (`AND`/`OR`/`NOT` tooltip text) | `jomini/common/trigger_localization/` |
+| Notification-window GUI | `jomini/gui/notifications/` |
+
+**`clausewitz/` — engine *tooling* only, not mod content.** `gui_editor`, `node_editor`,
+`particle_editor`, `pdx_profiler`. Don't look here for game data. In particular `clausewitz/fonts/`
+are **editor** fonts (Open Sans, Roboto Mono) — the real in-game fonts are in `<game>\fonts\`.
+
+**`<game>\data_binding\*.txt`** defines the engine's GUI macro functions — the readable reference
+for the `[ ]` datamodel expressions you write in `.gui` files (see `gui.md`).
+
 ## Game folder directory map
 
 Top level: `common/` (the game database, ~100 subfolders), `events/`, `history/`, `gui/`,

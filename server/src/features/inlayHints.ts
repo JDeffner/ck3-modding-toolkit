@@ -84,7 +84,7 @@ function locPreviewHints(data: ServerData, document: TextDocument, range: Range)
         const def = defs[0];
         hints.push({
           position,
-          label: truncate(`"${def.value ?? ""}"`, HINT_MAX_LEN),
+          label: truncate(def.value ?? "", HINT_MAX_LEN),
           paddingLeft: true,
           tooltip: {
             kind: MarkupKind.Markdown,
@@ -126,7 +126,7 @@ function translationOverlayHints(
     const label = def.value.length > 80 ? def.value.slice(0, 79) + "…" : def.value;
     hints.push({
       position: { line: lineNo, character: lineText.length },
-      label: `⟵ ${settings.locLanguage}: "${label}"`,
+      label: `⟵ ${settings.locLanguage}: ${label}`,
       paddingLeft: true,
       tooltip: {
         kind: MarkupKind.Markdown,

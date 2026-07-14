@@ -12,11 +12,20 @@ export interface Ck3Config {
   logsPath: string | null;
   /** ck3-tiger binary, or null (diagnostics disabled). */
   tigerPath: string | null;
-  /** Mod folder; defaults to the first workspace folder. */
+  /** Mod folder; defaults to the first workspace folder that looks like a mod
+   * (containers of mods expand to their child mods). */
   modPath: string | null;
   /** Parent/dependency mod roots: `ck3.parentMods` plus any additional
-   * workspace folder that looks like a CK3 mod. Load order, base first. */
+   * workspace mod (see workspaceMods). Load order, base first. */
   parentPaths: string[];
+  /** Every mod root that comes from the workspace itself (folders that look
+   * like mods, plus child mods of container folders), minus modPath. These are
+   * the mods the user is EDITING — per-file features (tiger runs, loc writes,
+   * reference indexing) treat them like the mod, unlike ck3.parentMods
+   * dependencies which are read-only context. */
+  workspaceMods: string[];
+  /** `ck3.excludedMods`: workspace mod roots skipped entirely (sanitized). */
+  excludedMods: string[];
   locLanguage: string;
   scopeInlayHints: boolean;
   tigerRunOn: "save" | "manual";
@@ -92,7 +101,19 @@ export function readConfig(): Ck3Config {
     return value;
   };
 
-  const gamePath = readPath("gamePath", "Game path");
+  // A CK3 game install opened as a workspace folder can stand in for an unset
+  // or invalid ck3.gamePath (data dir directly, or the install root resolved to
+  // its game/ subfolder). Not a warning: setup.ts reports the effective path.
+  let workspaceGameDir: string | null = null;
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const g = gameDataDir(folder.uri.fsPath);
+    if (g) {
+      workspaceGameDir = g;
+      break;
+    }
+  }
+
+  const gamePath = readPath("gamePath", "Game path") ?? workspaceGameDir;
   let logsPath = readPath("logsPath", "script_docs logs path");
   if (logsPath === null && (cfg.get<string>("logsPath") ?? "").trim() === "") {
     logsPath = defaultLogsPath();
@@ -101,14 +122,56 @@ export function readConfig(): Ck3Config {
   const tigerPath = readPath("tigerPath", "ck3-tiger path");
 
   let modPath = readPath("modPath", "Mod path");
+
+  // `ck3.excludedMods`: workspace mods the user opted out of indexing.
+  const excludedMods = sanitizeStringList(cfg.get("excludedMods"))
+    .map((p) => p.trim())
+    .filter((p) => p !== "");
+  const excludedKeys = new Set(excludedMods.map(normKey));
+  const isExcluded = (p: string) => excludedKeys.has(normKey(p));
+
+  // Mod roots contributed by the workspace: each folder that looks like a mod,
+  // or — for a folder that HOLDS mods (the "one parent directory with 20 mod
+  // folders" layout) — its direct children that look like mods. Excluded mods
+  // are dropped here, so nothing downstream (indexing, tiger, views) sees them.
+  const workspaceRoots: string[] = [];
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    workspaceRoots.push(...expandModContainer(folder.uri.fsPath).filter((p) => !isExcluded(p)));
+  }
+  // An explicitly configured modPath may itself be such a container: expand it
+  // and treat the first child as the mod so tiger/descriptor features work.
+  if (modPath !== null && !looksLikeMod(modPath)) {
+    const children = expandModContainer(modPath).filter((p) => !isExcluded(p));
+    if (children.length > 0 && children[0].toLowerCase() !== modPath.toLowerCase()) {
+      workspaceRoots.unshift(...children);
+      modPath = children[0];
+    }
+  }
   if (modPath === null && (cfg.get<string>("modPath") ?? "").trim() === "") {
-    modPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+    // Default: the first workspace mod; a non-mod folder keeps the old
+    // first-folder fallback so setup warnings stay meaningful. Game installs are
+    // never a mod, so they never become the default modPath.
+    const firstNonGameFolder = (vscode.workspace.workspaceFolders ?? [])
+      .map((f) => f.uri.fsPath)
+      .find((p) => !looksLikeGameDir(p) && !isExcluded(p));
+    modPath = workspaceRoots[0] ?? firstNonGameFolder ?? null;
+  }
+
+  const workspaceMods: string[] = [];
+  const seenWs = new Set<string>();
+  for (const p of workspaceRoots) {
+    const key = p.toLowerCase();
+    if (seenWs.has(key)) continue;
+    if (modPath && key === modPath.toLowerCase()) continue;
+    if (gamePath && key === gamePath.toLowerCase()) continue;
+    seenWs.add(key);
+    workspaceMods.push(p);
   }
 
   // Parent mods (submod / compatibility-patch workflow): the explicit setting
-  // first (load order), then any additional workspace folder that looks like a
-  // CK3 mod — open the submod plus its parents as workspace folders and the
-  // whole playset resolves, CW Tools style.
+  // first (load order), then every additional workspace mod — open the submod
+  // plus its parents as workspace folders and the whole playset resolves,
+  // CW Tools style.
   const parentPaths: string[] = [];
   const seenParents = new Set<string>();
   const addParent = (p: string) => {
@@ -128,10 +191,7 @@ export function readConfig(): Ck3Config {
     }
     addParent(value);
   }
-  for (const folder of vscode.workspace.workspaceFolders ?? []) {
-    const p = folder.uri.fsPath;
-    if (looksLikeMod(p)) addParent(p);
-  }
+  for (const p of workspaceMods) addParent(p);
 
   const tigerRunOn = cfg.get<string>("tigerRunOn") === "manual" ? "manual" : "save";
 
@@ -141,6 +201,8 @@ export function readConfig(): Ck3Config {
     tigerPath,
     modPath,
     parentPaths,
+    workspaceMods,
+    excludedMods,
     locLanguage: (cfg.get<string>("locLanguage") ?? "english").trim().toLowerCase() || "english",
     scopeInlayHints: cfg.get<boolean>("scopeInlayHints") ?? false,
     tigerRunOn,
@@ -150,6 +212,60 @@ export function readConfig(): Ck3Config {
     diagnosticsVanilla: cfg.get<boolean>("diagnostics.vanilla") ?? false,
     warnings,
   };
+}
+
+/** Trailing-separator-free lowercase key for path comparisons. */
+function normKey(p: string): string {
+  return path.normalize(p).replace(/[\\/]+$/, "").toLowerCase();
+}
+
+/**
+ * Every workspace mod root candidate, IGNORING `ck3.excludedMods` — the
+ * exclusion picker needs the full list so excluded mods can be re-included.
+ */
+export function allWorkspaceModCandidates(): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    for (const p of expandModContainer(folder.uri.fsPath)) {
+      const key = p.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+/**
+ * A workspace folder as a list of mod roots: itself when it looks like a mod,
+ * else its direct children that do (a folder holding many mod folders).
+ */
+function expandModContainer(dir: string): string[] {
+  // A game install shares the mod content dirs (common/, events/, ...) but is
+  // never a mod; keep it and its game/ subfolder out of the mod roots.
+  if (looksLikeGameDir(dir)) return [];
+  if (looksLikeMod(dir)) return [dir];
+  const mods: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const child = path.join(dir, entry.name);
+      if (looksLikeGameDir(child)) continue;
+      if (looksLikeMod(child)) mods.push(child);
+    }
+  } catch {
+    // Unreadable folder: contributes nothing.
+  }
+  return mods;
+}
+
+/** The workspace mod root a file belongs to (modPath first), or null. */
+export function modRootFor(file: string, cfg: Ck3Config): string | null {
+  for (const root of [cfg.modPath, ...cfg.workspaceMods]) {
+    if (root && isUnder(root, file)) return root;
+  }
+  return null;
 }
 
 /** A folder counts as a CK3 mod if it has a descriptor or the usual content dirs. */
@@ -162,6 +278,40 @@ export function looksLikeMod(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The `game` data folder for a CK3 install directory, or null if `dir` is not a
+ * game install. Two accepted shapes: the data dir itself (`.../Crusader Kings
+ * III/game`) and the install root (`.../Crusader Kings III`, resolved to its
+ * game/ child). Markers verified against a real install: the data dir carries
+ * the engine artifacts checksum_manifest.txt + paths.settings; the root carries
+ * binaries/ alongside the game/ data folder.
+ */
+export function gameDataDir(dir: string): string | null {
+  try {
+    if (
+      fs.existsSync(path.join(dir, "checksum_manifest.txt")) &&
+      fs.existsSync(path.join(dir, "paths.settings"))
+    ) {
+      return dir;
+    }
+    const child = path.join(dir, "game");
+    if (
+      fs.existsSync(path.join(dir, "binaries")) &&
+      fs.existsSync(path.join(child, "checksum_manifest.txt"))
+    ) {
+      return child;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when `dir` is a CK3 game install (data dir or install root). */
+export function looksLikeGameDir(dir: string): boolean {
+  return gameDataDir(dir) !== null;
 }
 
 export function isUnder(root: string | null, file: string): boolean {

@@ -43,16 +43,17 @@ function listGuiFiles(root: string): Map<string, string> {
 function buildStore(
   gamePath: string | null,
   modPath: string | null,
-  parentPaths: string[]
+  parentPaths: string[],
+  engineRoots: string[]
 ): { defs: GuiDefs; files: number } {
-  const key = `${gamePath ?? ""}|${parentPaths.join(";")}|${modPath ?? ""}`;
+  const key = `${engineRoots.join(";")}|${gamePath ?? ""}|${parentPaths.join(";")}|${modPath ?? ""}`;
   if (cache && cache.key === key) return { defs: cache.defs, files: cache.files };
 
   // Effective file set: later roots win the same relative path (whole-file
-  // replacement) — vanilla, then parent mods in load order, then the mod —
-  // and FIOS applies across the sorted result.
+  // replacement) — engine (jomini), vanilla, parent mods in load order, then the
+  // mod — and FIOS applies across the sorted result.
   const effective = new Map<string, string>();
-  for (const root of [gamePath, ...parentPaths, modPath]) {
+  for (const root of [...engineRoots, gamePath, ...parentPaths, modPath]) {
     if (!root) continue;
     for (const [rel, abs] of listGuiFiles(path.join(root, "gui"))) effective.set(rel, abs);
   }
@@ -72,8 +73,13 @@ function buildStore(
 }
 
 /** The cross-file template/type store (cached), for navigation and hover. */
-export function getGuiDefs(gamePath: string | null, modPath: string | null, parentPaths: string[] = []): GuiDefs {
-  return buildStore(gamePath, modPath, parentPaths).defs;
+export function getGuiDefs(
+  gamePath: string | null,
+  modPath: string | null,
+  parentPaths: string[] = [],
+  engineRoots: string[] = []
+): GuiDefs {
+  return buildStore(gamePath, modPath, parentPaths, engineRoots).defs;
 }
 
 /** Drop the cached store (mod .gui saved, settings changed). */
@@ -85,9 +91,10 @@ export function computeGuiLayoutResult(
   text: string,
   gamePath: string | null,
   modPath: string | null,
-  parentPaths: string[] = []
+  parentPaths: string[] = [],
+  engineRoots: string[] = []
 ): GuiLayoutResult {
-  const { defs, files } = buildStore(gamePath, modPath, parentPaths);
+  const { defs, files } = buildStore(gamePath, modPath, parentPaths, engineRoots);
   const nodes = computeGuiLayout(text, { defs, viewport: VIEWPORT });
   const textures = new Set<string>();
   let nodeCount = 0;

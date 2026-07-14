@@ -31,11 +31,27 @@ function downscale(img: DecodedImage, maxDim: number): DecodedImage {
   return { width: dw, height: dh, pixels: out };
 }
 
-/** Decode a DDS, optionally downscale so max(w,h) <= maxDim, encode PNG, return a data URI. */
-export function ddsToPngDataUri(buf: Uint8Array, maxDim = 256): string {
+/**
+ * Decode a DDS, downscale so max(w,h) <= maxDim, encode PNG, return a data URI —
+ * or null if even a shrunk preview can't fit the length budget.
+ *
+ * VS Code's hover markdown renderer hard-truncates any hover body longer than
+ * 100_000 chars (`preprocessMarkdownString` in markdownRenderer.ts: `if
+ * (value.length > 100_000) value = value.substr(0, 100_000) + '…'`). That cut
+ * lands mid-base64 inside `![texture](data:...)`, leaving an unterminated image
+ * link that markdown-it then renders as literal text — the raw base64 spilling
+ * into the popup. Smooth vanilla art deflates small (~55-80 KB URIs) and stays
+ * under the limit; noisy/photographic converter output can exceed it (a 1592x848
+ * DXT1 event scene measured ~108 KB). So we cap the URI at `maxUriLength` and
+ * progressively shrink maxDim until it fits, decoding only once.
+ */
+export function ddsToPngDataUri(buf: Uint8Array, maxDim = 256, maxUriLength = 90_000): string | null {
   const decoded = decodeDds(buf);
-  const scaled = downscale(decoded, maxDim);
-  const png = encodePng(scaled.width, scaled.height, scaled.pixels);
-  const base64 = Buffer.from(png).toString("base64");
-  return `data:image/png;base64,${base64}`;
+  for (let dim = maxDim; dim >= 32; dim = Math.floor(dim * 0.75)) {
+    const scaled = downscale(decoded, dim);
+    const png = encodePng(scaled.width, scaled.height, scaled.pixels);
+    const uri = `data:image/png;base64,${Buffer.from(png).toString("base64")}`;
+    if (uri.length <= maxUriLength) return uri;
+  }
+  return null;
 }

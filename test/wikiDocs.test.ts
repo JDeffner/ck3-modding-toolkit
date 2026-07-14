@@ -33,11 +33,10 @@ describe("parseWikiEffects on the bundled Effects_list.md", () => {
     expect(tokens.every((t) => t.kind === "effect")).toBe(true);
   });
 
-  it("spot-check: add_house_modifier has doc, example and scopes", () => {
+  it("spot-check: add_house_modifier has doc, usage example and scopes", () => {
     const t = tokens.find((x) => x.name === "add_house_modifier")!;
     expect(t.doc).toContain("modifier to a house");
-    expect(t.traits).toContain("Example:");
-    expect(t.traits).toContain("add_house_modifier = name");
+    expect(t.usage).toContain("add_house_modifier = name");
     expect(t.scopes).toContain("dynasty house");
   });
 
@@ -86,7 +85,7 @@ describe("mergeWikiTokens", () => {
     { name: "empty_doc", kind: "effect", doc: "", scopes: [] },
   ];
   const wiki: TokenData[] = [
-    { name: "add_gold", kind: "effect", doc: "wiki doc", scopes: ["character"], traits: "Example:\nadd_gold = X" },
+    { name: "add_gold", kind: "effect", doc: "wiki doc", scopes: ["character"], usage: "add_gold = X" },
     { name: "empty_doc", kind: "effect", doc: "wiki fills this", scopes: [] },
     { name: "wiki_only_effect", kind: "effect", doc: "only on the wiki", scopes: [] },
     { name: "add_gold", kind: "trigger", doc: "same name, other kind", scopes: [] },
@@ -96,7 +95,7 @@ describe("mergeWikiTokens", () => {
     const merged = mergeWikiTokens(scriptDocs, wiki);
     const addGold = merged.find((t) => t.name === "add_gold" && t.kind === "effect")!;
     expect(addGold.doc).toBe("authoritative doc");
-    expect(addGold.traits).toContain("add_gold = X");
+    expect(addGold.usage).toContain("add_gold = X");
   });
 
   it("fills empty docs and adds wiki-only tokens with a provenance note", () => {

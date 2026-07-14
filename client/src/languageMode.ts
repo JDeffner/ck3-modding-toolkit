@@ -16,7 +16,9 @@ import { isUnder, looksLikeMod } from "./config";
  * scope) win; we only fill gaps, once.
  */
 export async function ensureFileAssociations(cfg: Ck3Config): Promise<void> {
-  if (!cfg.enableForWorkspace || !cfg.modPath || !looksLikeMod(cfg.modPath)) return;
+  if (!cfg.enableForWorkspace) return;
+  const isModWorkspace = (cfg.modPath !== null && looksLikeMod(cfg.modPath)) || cfg.workspaceMods.length > 0;
+  if (!isModWorkspace) return;
   if (!vscode.workspace.workspaceFolders?.length) return;
   const wanted: Record<string, string> = {
     "*.txt": "paradox",

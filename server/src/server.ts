@@ -33,6 +33,7 @@ import {
   type LocEntryInfo,
   type LookupLocParams,
   type ModFileChangeParams,
+  type ModScopedParams,
   type ReloadDocsParams,
   type ReloadDocsResult,
   eventDetailRequest,
@@ -48,6 +49,8 @@ import {
   type GuiLayoutParams,
   guiWidgetEditRequest,
   type GuiWidgetEditParams,
+  dependenciesRequest,
+  type DependenciesParams,
 } from "../../shared/src/protocol";
 import { buildGuiTree } from "./features/guiTree";
 import { computeGuiLayoutResult, invalidateGuiDefsCache } from "./gui/layoutService";
@@ -59,6 +62,10 @@ import { getLineText } from "./documents";
 import { computeEventDetail } from "./overview/eventDetail";
 import { loadTokenData, parseOnActionsLog } from "./data/docsParser";
 import { loadDataTypes } from "./data/dataTypes";
+import { loadDataBindingMacros } from "./data/dataBindingMacros";
+import { DefinesIndex } from "./data/defines";
+import { TextFormattingIndex } from "./data/textFormatting";
+import { provideFormatTagCompletion, provideFormatTagHover } from "./features/locFormatting";
 import { loadDataFnUsageAsync } from "./data/dataFnUsage";
 import { loadWikiTokens, mergeWikiTokens } from "./data/wikiDocs";
 import { loadFreqs } from "../../shared/src/schema/freqs";
@@ -73,6 +80,7 @@ import {
 } from "./index/indexer";
 import { extractDefinitions } from "./index/extract";
 import { extractReferences } from "./index/references";
+import { ModOriginResolver } from "./index/modOrigin";
 import { loadSchema, type SchemaData } from "./schema/loader";
 import { VARIABLE_KINDS } from "../../shared/src/schema/ck3Schema";
 import type { Ck3SchemaEntry } from "../../shared/src/schema/types";
@@ -81,7 +89,7 @@ import { ServerData } from "./serverData";
 import { CompletionFeature } from "./features/completion";
 import { provideHover } from "./features/hover";
 import { provideTextureHover } from "./features/textureHover";
-import { provideDefinition } from "./features/definition";
+import { provideDefinition, provideLocDefinition } from "./features/definition";
 import { SEMANTIC_LEGEND, provideSemanticTokens } from "./features/semanticTokens";
 import { provideInlayHints } from "./features/inlayHints";
 import { provideCodeActions } from "./features/codeActions";
@@ -109,6 +117,8 @@ import { computeModOverview } from "./overview/modOverview";
 import { computeLocCoverage } from "./overview/locCoverage";
 import { computeOverrides } from "./overview/overrides";
 import { computeEventGraph } from "./overview/eventGraph";
+import { computeDependencies } from "./overview/dependencies";
+import { wordRangeAt } from "./wordAt";
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
@@ -118,6 +128,7 @@ let settings: Ck3Settings = {
   logsPath: null,
   modPath: null,
   parentPaths: [],
+  workspaceMods: [],
   locLanguage: "english",
   scopeInlayHints: false,
   diagnosticsIgnore: [],
@@ -138,9 +149,30 @@ const namespacesByFile = new Map<string, string[]>();
 
 const data = new ServerData();
 const completion = new CompletionFeature(data, () => schema);
+/** Mod display names for hover/completion origin labels ("· My Mod" instead of
+ * "· mod"); roots re-resolved on path changes and descriptor.mod edits. */
+const modOrigin = new ModOriginResolver();
+data.originLabel = (def) => modOrigin.labelFor(def.file, def.source);
+data.modRootOf = (file) => modOrigin.rootFor(file);
+
+function refreshModOrigin(): void {
+  modOrigin.setRoots([...(settings.modPath ? [settings.modPath] : []), ...parentRoots()]);
+}
+
+/** Focus predicate for the mod-scoped overview requests: with a `modRoot`
+ * param only that workspace mod's files pass; without one, every mod file. */
+function focusFilter(modRoot: string | null | undefined): (file: string) => boolean {
+  if (!modRoot) return () => true;
+  const wanted = modRoot.toLowerCase();
+  return (file) => modOrigin.rootFor(file)?.toLowerCase() === wanted;
+}
+/** Engine-token test for call-reference extraction: engine effect/trigger call
+ * sites stay out of the reference index (memory guard for AGOT-sized mods). */
+const isEngineToken = (name: string) => data.tokenMap.has(name);
 
 /** Ordered parent-mod roots: settings (ck3.parentMods / workspace folders)
- * merged with the mod's .ck3modding/playset.json, minus mod/game roots. */
+ * merged with every workspace mod's .ck3modding/playset.json, minus mod/game
+ * roots. */
 function parentRoots(): string[] {
   const roots: string[] = [];
   const seen = new Set<string>();
@@ -153,13 +185,57 @@ function parentRoots(): string[] {
     roots.push(p);
   };
   for (const p of settings.parentPaths ?? []) add(p);
-  if (settings.modPath) for (const p of readPlayset(settings.modPath)) add(p);
+  for (const mod of [...(settings.modPath ? [settings.modPath] : []), ...workspaceModRoots()]) {
+    for (const p of readPlaysetCached(mod)) add(p);
+  }
   return roots;
+}
+
+/** parentRoots() runs on every request (via contentRoots); with 20 workspace
+ * mods the per-mod playset fs probes need a cache. Cleared on reindex. */
+const playsetCache = new Map<string, string[]>();
+function readPlaysetCached(modRoot: string): string[] {
+  const key = modRoot.toLowerCase();
+  let v = playsetCache.get(key);
+  if (!v) playsetCache.set(key, (v = readPlayset(modRoot)));
+  return v;
 }
 
 /** Content roots in precedence order: mod, parents, vanilla. */
 function contentRoots(): string[] {
   return [settings.modPath, ...parentRoots(), settings.gamePath].filter((r): r is string => r !== null);
+}
+
+/** Engine-layer roots shipped next to `<game>`, lowest content priority
+ * (real load order: clausewitz → jomini → game → mods). Only jomini is
+ * included: it holds real script/gui content (trigger_localization, defines,
+ * base textformatting, notification gui). clausewitz is deliberately excluded
+ * because it contains only Paradox tooling UI (gui_editor, node_editor,
+ * profilers) that no game or mod file references. */
+function engineRoots(): string[] {
+  if (!settings.gamePath) return [];
+  const jomini = path.join(path.dirname(settings.gamePath), "jomini");
+  return fs.existsSync(jomini) ? [jomini] : [];
+}
+
+/** Workspace mod roots beyond modPath: mods being edited (multi-mod workspaces).
+ * They get reference indexing and reference diagnostics like the mod itself. */
+function workspaceModRoots(): string[] {
+  const mods: string[] = [];
+  for (const p of settings.workspaceMods ?? []) {
+    if (settings.modPath && p.toLowerCase() === settings.modPath.toLowerCase()) continue;
+    mods.push(p);
+  }
+  return mods;
+}
+
+/** The workspace mod root a file lives under, or null. Every workspace mod is
+ * a first-class editable mod (source "mod"); there is no primary-mod special
+ * case — dependency parents (ck3.parentMods / playset) stay "parent". */
+function workspaceRootOf(fsPath: string): string | null {
+  const lower = fsPath.toLowerCase();
+  if (settings.modPath && lower.startsWith(settings.modPath.toLowerCase())) return settings.modPath;
+  return workspaceModRoots().find((r) => lower.startsWith(r.toLowerCase())) ?? null;
 }
 
 /** Schema entry for the folder a file lives in (structure/ambient/root-scope seed). */
@@ -215,11 +291,13 @@ data.onDidChange(() => {
 function loadDocs(force: boolean): void {
   tokensFromScriptDocs = false;
   let scriptTokens = [] as ReturnType<typeof loadTokenData>["tokens"];
+  let modifierTemplates = [] as ReturnType<typeof loadTokenData>["templates"];
   if (settings.logsPath) {
     const t0 = Date.now();
     const docsCacheFile = path.join(storageDir, "docsCache.json");
     const result = loadTokenData(settings.logsPath, docsCacheFile, force);
     scriptTokens = result.tokens;
+    modifierTemplates = result.templates;
     tokensFromScriptDocs = scriptTokens.length > 0;
     if (result.fromCache) log(`loaded token data from cache (${result.tokens.length} tokens, ${Date.now() - t0}ms)`);
     else log(`parsed script_docs logs (${result.tokens.length} tokens, ${Date.now() - t0}ms)`);
@@ -228,6 +306,10 @@ function loadDocs(force: boolean): void {
     }
   } else {
     log("script_docs logs path not found; engine tokens come from the bundled wiki docs only.");
+  }
+  data.setModifierTemplates(modifierTemplates);
+  if (data.modifierTemplates.length > 0) {
+    log(`templated modifiers: ${data.modifierTemplates.length} templates expand against the definition index`);
   }
   const t1 = Date.now();
   const wikiTokens = loadWikiTokens(wikidocsDir);
@@ -239,6 +321,12 @@ function loadDocs(force: boolean): void {
   if (data.onActionScopes.size > 0) log(`on_actions.log: ${data.onActionScopes.size} on_action root scopes`);
 
   data.dataTypes = loadDataTypes(settings.logsPath);
+  // Promote game (+ every workspace mod's) data_binding macros as global [ … ] functions.
+  const macroRoots = [settings.gamePath, settings.modPath, ...workspaceModRoots()].filter(
+    (r): r is string => r !== null
+  );
+  const macros = loadDataBindingMacros(macroRoots, data.dataTypes);
+  if (macros > 0) log(`data_binding macros: ${macros} promoted into data-function completion/hover`);
   if (data.dataTypes.source === "bundled wiki") {
     log(
       `data types: ${data.dataTypes.count} entries from the bundled wiki tables ` +
@@ -269,7 +357,42 @@ let usageGeneration = 0;
 
 /** Path bundle for gui navigation/hover (FIOS template/type store). */
 function guiPaths(): GuiPaths {
-  return { gamePath: settings.gamePath, modPath: settings.modPath, parentPaths: settings.parentPaths ?? [] };
+  return {
+    gamePath: settings.gamePath,
+    modPath: settings.modPath,
+    parentPaths: settings.parentPaths ?? [],
+    engineRoots: engineRoots(),
+  };
+}
+
+/**
+ * In-memory harvest of engine/game/mod `define:` constants and `#tag` loc
+ * text-formats (small — a few thousand entries; not persisted into the vanilla
+ * index cache). Rebuilt fresh so a paths change / mod edit cannot leave stale
+ * layers. Engine (jomini) is the lowest layer, the mod the highest (last-wins).
+ */
+function harvestEngineData(): void {
+  const t0 = Date.now();
+  // Every workspace mod is a "mod" layer (multi-mod workspaces), added after
+  // engine + game so mod definitions win.
+  const modLayerRoots = [...(settings.modPath ? [settings.modPath] : []), ...workspaceModRoots()];
+  const defines = new DefinesIndex();
+  for (const root of engineRoots()) defines.addLayer(root, "jomini");
+  if (settings.gamePath) defines.addLayer(settings.gamePath, "game");
+  for (const root of modLayerRoots) defines.addLayer(root, "mod");
+  data.defines = defines;
+  const tDef = Date.now() - t0;
+
+  const t1 = Date.now();
+  const textFormatting = new TextFormattingIndex();
+  for (const root of engineRoots()) textFormatting.addLayer(root, "jomini");
+  if (settings.gamePath) textFormatting.addLayer(settings.gamePath, "game");
+  for (const root of modLayerRoots) textFormatting.addLayer(root, "mod");
+  data.textFormatting = textFormatting;
+  log(
+    `harvested defines: ${defines.count} constants (${tDef}ms), ` +
+      `loc text formats: ${textFormatting.count} tags (${Date.now() - t1}ms)`
+  );
 }
 
 const yieldNow = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -323,10 +446,16 @@ async function scanRootChunked(
   return defs;
 }
 
-/** Reference pass over every .txt in the mod (references live everywhere, not just schema folders). */
-async function scanModReferences(modPath: string, generation: number): Promise<boolean> {
+/** Reference pass over every .txt in a workspace mod root (references live
+ * everywhere, not just schema folders). Runs for the mod AND every other
+ * workspace mod, so find-references/usage counts span multi-mod workspaces. */
+async function scanModReferences(
+  root: string,
+  source: "mod" | "parent",
+  generation: number
+): Promise<boolean> {
   const t0 = Date.now();
-  const files = listFiles(modPath, ".txt");
+  const files = listFiles(root, ".txt");
   const BATCH = 150;
   let refCount = 0;
   for (let i = 0; i < files.length; i += BATCH) {
@@ -334,7 +463,7 @@ async function scanModReferences(modPath: string, generation: number): Promise<b
     for (const file of files.slice(i, i + BATCH)) {
       const content = readFileStripBom(file);
       if (content === null) continue;
-      const extracted = extractReferences(content, file, "mod", schema);
+      const extracted = extractReferences(content, file, source, schema, isEngineToken);
       data.refIndex.addAll(extracted.references);
       if (extracted.implicitDefs.length > 0) data.index.addAll(extracted.implicitDefs);
       if (extracted.namespaces.length > 0) namespacesByFile.set(file.toLowerCase(), extracted.namespaces);
@@ -343,7 +472,10 @@ async function scanModReferences(modPath: string, generation: number): Promise<b
     await yieldNow();
   }
   rebuildModNamespaces();
-  log(`indexed mod references: ${refCount} usage sites in ${files.length} files (${Date.now() - t0}ms)`);
+  log(
+    `indexed ${path.basename(root)} references: ` +
+      `${refCount} usage sites in ${files.length} files (${Date.now() - t0}ms)`
+  );
   return true;
 }
 
@@ -377,7 +509,8 @@ function readPlayset(modPath: string): string[] {
 
 async function buildIndex(): Promise<void> {
   const generation = ++scanGeneration;
-  schema = loadSchema(settings.modPath, log);
+  playsetCache.clear();
+  schema = loadSchema([...(settings.modPath ? [settings.modPath] : []), ...workspaceModRoots()], log);
   data.completableKinds = new Set([
     ...schema.entries.filter((e) => e.completable !== false).map((e) => e.kind),
     "saved_scope",
@@ -387,6 +520,8 @@ async function buildIndex(): Promise<void> {
   data.refIndex.clear();
   namespacesByFile.clear();
   data.modNamespaces.clear();
+  refreshModOrigin();
+  harvestEngineData();
   indexing = true;
   sendStatus();
 
@@ -396,18 +531,29 @@ async function buildIndex(): Promise<void> {
       const defs = await scanRootChunked(settings.modPath, "mod", generation);
       if (defs === null) return;
       data.index.addAll(defs);
-      if (!(await scanModReferences(settings.modPath, generation))) return;
+      if (!(await scanModReferences(settings.modPath, "mod", generation))) return;
       data.notifyIndexChanged();
       log(`indexed mod: ${defs.length} definitions (${Date.now() - t0}ms)`);
     }
 
+    const wsMods = new Set(workspaceModRoots().map((r) => r.toLowerCase()));
     for (const parent of parentRoots()) {
       const t1 = Date.now();
-      const parentDefs = await scanRootChunked(parent, "parent", generation);
+      // Workspace mods are edited mods like any other: source "mod" (full
+      // reference indexing, views, ranking). Only dependency parents from
+      // ck3.parentMods / playset.json are read-only "parent" context.
+      const isWorkspaceMod = wsMods.has(parent.toLowerCase());
+      const parentDefs = await scanRootChunked(parent, isWorkspaceMod ? "mod" : "parent", generation);
       if (parentDefs === null) return;
       data.index.addAll(parentDefs);
+      if (isWorkspaceMod) {
+        if (!(await scanModReferences(parent, "mod", generation))) return;
+      }
       data.notifyIndexChanged();
-      log(`indexed parent mod ${path.basename(parent)}: ${parentDefs.length} definitions (${Date.now() - t1}ms)`);
+      log(
+        `indexed ${isWorkspaceMod ? "workspace mod" : "parent mod"} ${path.basename(parent)}: ` +
+          `${parentDefs.length} definitions (${Date.now() - t1}ms)`
+      );
     }
 
     if (settings.gamePath) {
@@ -423,9 +569,21 @@ async function buildIndex(): Promise<void> {
         const progress = await connection.window.createWorkDoneProgress();
         progress.begin("CK3: indexing vanilla", 0, "scanning...", false);
         try {
+          // Engine layer first so game definitions come later (game shadows
+          // jomini, matching load order). Cached together with vanilla.
+          const engineDefs: Definition[] = [];
+          for (const engine of engineRoots()) {
+            const d = await scanRootChunked(engine, "vanilla", generation);
+            if (d === null) return;
+            engineDefs.push(...d);
+          }
           defs = await scanRootChunked(gamePath, "vanilla", generation, (pct, msg) =>
             progress.report(pct, msg)
           );
+          if (defs !== null && engineDefs.length > 0) {
+            log(`indexed engine layer (jomini): ${engineDefs.length} definitions`);
+            defs = [...engineDefs, ...defs];
+          }
         } finally {
           progress.done();
         }
@@ -451,11 +609,11 @@ async function buildIndex(): Promise<void> {
 
 function rescanModFile(fsPath: string): void {
   const lower = fsPath.toLowerCase();
-  const isMod = settings.modPath !== null && lower.startsWith(settings.modPath.toLowerCase());
-  const parentRoot = isMod ? null : parentRoots().find((r) => lower.startsWith(r.toLowerCase()));
-  if (!isMod && !parentRoot) return;
-  const root = isMod ? settings.modPath! : parentRoot!;
-  const source = isMod ? ("mod" as const) : ("parent" as const);
+  const wsRoot = workspaceRootOf(fsPath);
+  const parentRoot = wsRoot ? null : parentRoots().find((r) => lower.startsWith(r.toLowerCase()));
+  if (!wsRoot && !parentRoot) return;
+  const root = wsRoot ?? parentRoot!;
+  const source = wsRoot ? ("mod" as const) : ("parent" as const);
 
   const entry = classifyFile(root, fsPath, schema.entries);
   const isScript = lower.endsWith(".txt");
@@ -468,12 +626,14 @@ function rescanModFile(fsPath: string): void {
   if (entry && content !== null) {
     data.index.addAll(extractDefinitions(content, entry, fsPath, source));
   }
-  // The reference table and namespace set stay mod-only (matching buildIndex).
-  if (isMod && isScript) {
+  // References and namespaces are tracked for every workspace mod (matching
+  // buildIndex); read-only dependency parents stay definition-only.
+  const isWorkspaceMod = wsRoot !== null;
+  if (isWorkspaceMod && isScript) {
     data.refIndex.removeFile(fsPath);
     namespacesByFile.delete(fsPath.toLowerCase());
     if (content !== null) {
-      const extracted = extractReferences(content, fsPath, "mod", schema);
+      const extracted = extractReferences(content, fsPath, source, schema, isEngineToken);
       data.refIndex.addAll(extracted.references);
       data.index.addAll(extracted.implicitDefs);
       if (extracted.namespaces.length > 0) namespacesByFile.set(fsPath.toLowerCase(), extracted.namespaces);
@@ -502,7 +662,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
         change: TextDocumentSyncKind.Incremental,
         save: true,
       },
-      completionProvider: { resolveProvider: true, triggerCharacters: [":", ".", "[", "'", "|"] },
+      completionProvider: { resolveProvider: true, triggerCharacters: [":", ".", "[", "'", "|", "#", "/"] },
       signatureHelpProvider: { triggerCharacters: ["{", "("], retriggerCharacters: ["=", ","] },
       hoverProvider: true,
       definitionProvider: true,
@@ -526,6 +686,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
 connection.onInitialized(() => {
   // Bundled frequency tables for completion ranking (§C3); fail-soft to empty.
   completion.setFreqs(loadFreqs(freqsDir));
+  completion.setSettings(settings);
   loadDocs(false);
   void buildIndex();
 });
@@ -538,12 +699,14 @@ connection.onNotification(configChangedNotification, (newSettings: Ck3Settings) 
     newSettings.logsPath !== settings.logsPath ||
     newSettings.modPath !== settings.modPath ||
     JSON.stringify(newSettings.parentPaths ?? []) !== JSON.stringify(settings.parentPaths ?? []) ||
+    JSON.stringify(newSettings.workspaceMods ?? []) !== JSON.stringify(settings.workspaceMods ?? []) ||
     newSettings.locLanguage !== settings.locLanguage;
   const diagChanged =
     JSON.stringify(newSettings.diagnosticsIgnore) !== JSON.stringify(settings.diagnosticsIgnore) ||
     JSON.stringify(newSettings.diagnosticsIgnorePatterns) !== JSON.stringify(settings.diagnosticsIgnorePatterns) ||
     newSettings.diagnosticsVanilla !== settings.diagnosticsVanilla;
   settings = newSettings;
+  completion.setSettings(settings);
   if (pathsChanged) {
     log("paths changed; rebuilding data...");
     loadDocs(false);
@@ -557,7 +720,11 @@ connection.onNotification(configChangedNotification, (newSettings: Ck3Settings) 
 
 connection.onNotification(modFileChangedNotification, (params: ModFileChangeParams) => {
   rescanModFile(params.fsPath);
-  if (params.fsPath.toLowerCase().endsWith(".gui")) invalidateGuiDefsCache();
+  const lower = params.fsPath.toLowerCase();
+  if (lower.endsWith(".mod")) refreshModOrigin();
+  if (lower.endsWith(".gui")) invalidateGuiDefsCache();
+  // Cheap full re-harvest when a mod defines file or a gui textformatting file changed.
+  if (lower.replace(/\\/g, "/").includes("common/defines/") || lower.endsWith(".gui")) harvestEngineData();
 });
 
 connection.onRequest(reloadDocsRequest, (params: ReloadDocsParams): ReloadDocsResult => {
@@ -567,20 +734,29 @@ connection.onRequest(reloadDocsRequest, (params: ReloadDocsParams): ReloadDocsRe
 
 connection.onRequest(indexStatsRequest, () => data.index.stats());
 
-connection.onRequest(modOverviewRequest, () => computeModOverview(data));
-
-connection.onRequest(locCoverageRequest, () =>
-  computeLocCoverage(data, settings.modPath, settings.locLanguage, schema.entries)
+connection.onRequest(modOverviewRequest, (params: ModScopedParams | null) =>
+  computeModOverview(data, focusFilter(params?.modRoot))
 );
 
-connection.onRequest(overridesRequest, () => computeOverrides(data, settings.modPath, settings.gamePath));
+connection.onRequest(locCoverageRequest, (params: ModScopedParams | null) => {
+  // Coverage is inherently per-mod: default to the first workspace mod when
+  // the client sends no focus (older clients, tests).
+  const root = params?.modRoot ?? settings.modPath ?? workspaceModRoots()[0] ?? null;
+  return computeLocCoverage(data, root, settings.locLanguage, schema.entries, focusFilter(root));
+});
 
-connection.onRequest(eventGraphRequest, (params: EventGraphParams) => computeEventGraph(data, params ?? {}));
+connection.onRequest(overridesRequest, (params: ModScopedParams | null) =>
+  computeOverrides(data, settings.gamePath, focusFilter(params?.modRoot))
+);
+
+connection.onRequest(eventGraphRequest, (params: EventGraphParams) =>
+  computeEventGraph(data, params ?? {}, focusFilter(params?.modRoot))
+);
 
 connection.onRequest(guiTreeRequest, (params: GuiTreeParams) => buildGuiTree(params.text ?? ""));
 
 connection.onRequest(guiLayoutRequest, (params: GuiLayoutParams) =>
-  computeGuiLayoutResult(params.text ?? "", settings.gamePath, settings.modPath, settings.parentPaths)
+  computeGuiLayoutResult(params.text ?? "", settings.gamePath, settings.modPath, settings.parentPaths, engineRoots())
 );
 
 connection.onRequest(guiWidgetEditRequest, (params: GuiWidgetEditParams) =>
@@ -590,6 +766,21 @@ connection.onRequest(guiWidgetEditRequest, (params: GuiWidgetEditParams) =>
 connection.onRequest(eventDetailRequest, (params: EventDetailParams) =>
   params?.id ? computeEventDetail(data, params.id) : null
 );
+
+connection.onRequest(dependenciesRequest, (params: DependenciesParams) => {
+  let name = params?.name;
+  let kind = params?.kind;
+  // Cursor-driven: resolve the word under the position in the open document.
+  if (!name && params?.uri && params.position) {
+    const doc = documents.get(params.uri);
+    if (doc) {
+      const range = wordRangeAt(getLineText(doc, params.position.line), params.position.character);
+      if (range) name = range.word;
+    }
+  }
+  if (!name) return { def: null, dependents: [], dependencies: [] };
+  return computeDependencies(data, schema, name, kind);
+});
 
 connection.onRequest(lookupLocRequest, (params: LookupLocParams): LocEntryInfo[] => {
   return data.index
@@ -604,16 +795,18 @@ connection.onCompletion((params) => {
   const doc = documents.get(params.textDocument.uri);
   if (!doc) return [];
   if (doc.languageId === "paradox-gui") {
-    const result = provideGuiCompletion(data, doc, doc.offsetAt(params.position));
+    const result = provideGuiCompletion(data, doc, doc.offsetAt(params.position), settings);
     return { isIncomplete: result.isIncomplete, items: result.items };
   }
   if (doc.languageId === "paradox-loc") {
-    // Loc lines complete only inside [ ... ] datafunction expressions.
+    // Loc lines complete inside [ ... ] datafunction expressions and #tag formats.
     const linePrefix = doc.getText({
       start: { line: params.position.line, character: 0 },
       end: params.position,
     });
-    const result = provideDataFnCompletion(data.dataTypes, data.dataFnUsage, linePrefix);
+    const result =
+      provideDataFnCompletion(data.dataTypes, data.dataFnUsage, linePrefix, data.index) ??
+      provideFormatTagCompletion(data.textFormatting, linePrefix);
     return result ? { isIncomplete: result.isIncomplete, items: result.items } : [];
   }
   if (doc.languageId !== "paradox") return [];
@@ -642,13 +835,10 @@ connection.onHover((params) => {
       start: { line: params.position.line, character: 0 },
       end: { line: params.position.line + 1, character: 0 },
     });
-    const dataFn = provideDataFnHover(
-      data.dataTypes,
-      data.dataFnUsage,
-      lineText.replace(/\r?\n$/, ""),
-      params.position.character,
-      settings.gamePath
-    );
+    const flat = lineText.replace(/\r?\n$/, "");
+    const dataFn =
+      provideDataFnHover(data.dataTypes, data.dataFnUsage, flat, params.position.character, settings.gamePath) ??
+      provideFormatTagHover(data.textFormatting, flat, params.position.character);
     if (!dataFn) return null;
     return {
       contents: { kind: MarkupKind.Markdown, value: dataFn.markdown },
@@ -659,10 +849,10 @@ connection.onHover((params) => {
     };
   }
   if (doc.languageId !== "paradox") return null;
-  const texture = provideTextureHover(settings, doc, params.position);
-  if (texture) return texture;
   const fsPath = URI.parse(doc.uri).fsPath;
   const entry = schemaEntryForFile(fsPath);
+  const texture = provideTextureHover(settings, doc, params.position, entry?.kind);
+  if (texture) return texture;
   return provideHover(
     data,
     doc,
@@ -675,7 +865,11 @@ connection.onHover((params) => {
 
 connection.onDefinition((params) => {
   const doc = documents.get(params.textDocument.uri);
-  if (!doc || (doc.languageId !== "paradox" && doc.languageId !== "paradox-gui")) return [];
+  if (!doc) return [];
+  // Loc files: navigate [ ... ] datafunction names (custom loc, saved scopes).
+  // Plain loc-key jumps stay with the client-side script-usage provider.
+  if (doc.languageId === "paradox-loc") return provideLocDefinition(data, doc, params.position);
+  if (doc.languageId !== "paradox" && doc.languageId !== "paradox-gui") return [];
   if (doc.languageId === "paradox-gui") {
     // Types, templates and blockoverride targets resolve through the FIOS
     // store first (what the game actually uses); loc keys etc. fall through.
@@ -720,7 +914,8 @@ connection.languages.semanticTokens.on((params) => {
 
 connection.onReferences((params) => {
   const doc = documents.get(params.textDocument.uri);
-  if (!doc || doc.languageId !== "paradox") return [];
+  // Loc files too: references on a loc key line list its script usage sites.
+  if (!doc || (doc.languageId !== "paradox" && doc.languageId !== "paradox-loc")) return [];
   return provideReferences(data, doc, params.position, params.context.includeDeclaration);
 });
 
@@ -790,9 +985,12 @@ function relForPatterns(fsPath: string): string {
 }
 
 function validateDocument(doc: TextDocument): void {
+  const fsPath = URI.parse(doc.uri).fsPath;
   const ctx: FileContext = {
-    fsPath: URI.parse(doc.uri).fsPath,
-    modPath: settings.modPath,
+    fsPath,
+    // Folder-layout checks apply to the workspace mod the file lives in
+    // (multi-mod workspaces), falling back to the configured mod root.
+    modPath: workspaceRootOf(fsPath) ?? settings.modPath,
     bomOnDisk: bomByUri.get(doc.uri) ?? null,
   };
 
@@ -817,12 +1015,13 @@ function validateDocument(doc: TextDocument): void {
   } else if (doc.languageId === "paradox") {
     const { result, lineIndex } = getParse(doc);
     diagnostics = computeScriptDiagnostics(result, lineIndex, ctx);
-    // Conservative index-backed checks, for mod files only.
-    if (settings.modPath && ctx.fsPath.toLowerCase().startsWith(settings.modPath.toLowerCase())) {
+    // Conservative index-backed checks, for workspace mod files only.
+    const owner = workspaceRootOf(ctx.fsPath);
+    if (owner) {
       const text = doc.getText();
-      const extracted = extractReferences(text, ctx.fsPath, "mod", schema);
+      const extracted = extractReferences(text, ctx.fsPath, "mod", schema, isEngineToken);
       diagnostics.push(...computeReferenceDiagnostics(extracted.references, data));
-      const entry = classifyFile(settings.modPath, ctx.fsPath, schema.entries);
+      const entry = classifyFile(owner, ctx.fsPath, schema.entries);
       if (entry?.requiredLoc && entry.kind !== "loc_key") {
         const defs = extractDefinitions(text.replace(/^﻿/, ""), entry, ctx.fsPath, "mod");
         diagnostics.push(...computeRequiredLocDiagnostics(defs, entry, data));

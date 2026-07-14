@@ -31,16 +31,78 @@ describe("parseLog", () => {
     expect(culture.scopes).toContain("output: culture");
   });
 
-  it("parses both modifiers.log styles and skips the preamble", () => {
+  it("parses all modifiers.log styles (dashed, 1.19 blank-line) and skips preamble", () => {
     const tokens = parseLog(fs.readFileSync(path.join(FIXTURE_LOGS, "modifiers.log"), "utf8"), "modifier");
-    expect(tokens.map((t) => t.name)).toEqual(["monthly_income", "diplomacy", "development_growth_factor"]);
+    expect(tokens.map((t) => t.name)).toEqual([
+      "monthly_income",
+      "diplomacy",
+      "development_growth_factor",
+      "$CULTURE$_opinion", // templated tags parse too; loaders partition them out
+      "stationed_$MEN_AT_ARMS_TYPE$_damage_add",
+      "dynasty_opinion", // 1.19 style: no separators, new "Tag:" begins an entry
+    ]);
     expect(tokens[0].traits).toContain("Categories: character");
+    // 1.19 metadata line is recorded on templated and concrete entries alike.
+    expect(tokens[3].traits).toContain("Use areas: character");
+    expect(tokens[5].traits).toContain("Use areas: character");
+  });
+
+  it("partitions templated tags into templates, never into concrete tokens", () => {
+    const result = loadTokenDataFromLogs(FIXTURE_LOGS);
+    expect(result.tokens.every((t) => !t.name.includes("$"))).toBe(true);
+    expect(result.templates.map((t) => t.name).sort()).toEqual([
+      "$CULTURE$_opinion",
+      "stationed_$MEN_AT_ARMS_TYPE$_damage_add",
+    ]);
+    expect(result.templates[0].traits).toContain("Use areas: character");
   });
 
   it("does not crash on unknown lines; they land in doc", () => {
     const tokens = parseLog("----\nweird_token - desc\nSome ODD metadata nobody expects\n", "trigger");
     expect(tokens).toHaveLength(1);
     expect(tokens[0].doc).toContain("ODD metadata");
+  });
+
+  it("captures an inline `name = { … }` example as usage, keeping the description clean", () => {
+    const log =
+      "----\n" +
+      "add_hook - Adds a hook on a character\n" +
+      "add_hook = { type = X, target = Y }\n" +
+      "Does send a toast to the player.\n" +
+      "Supported Scopes: character\n" +
+      "----\n";
+    const [t] = parseLog(log, "effect");
+    expect(t.usage).toBe("add_hook = { type = X, target = Y }");
+    expect(t.doc).toContain("Adds a hook on a character");
+    expect(t.doc).toContain("Does send a toast");
+    expect(t.doc).not.toContain("type = X"); // syntax lives in usage, not the prose
+    expect(t.scopes).toEqual(["character"]);
+  });
+
+  it("captures a multi-line `usage:` block verbatim, dropping the header", () => {
+    const log =
+      "----\n" +
+      "start_scheme - Starts a new scheme of the given type.\n" +
+      "usage:\n" +
+      "<scheme starting character> =\n" +
+      "\tstart_scheme = {\n" +
+      "\t\ttype = X\n" +
+      "\t}\n" +
+      "Supported Scopes: character\n" +
+      "----\n";
+    const [t] = parseLog(log, "effect");
+    expect(t.doc).toBe("Starts a new scheme of the given type.");
+    expect(t.usage).toContain("<scheme starting character> =");
+    expect(t.usage).toContain("\t\ttype = X"); // indentation preserved
+    expect(t.usage).not.toContain("usage:"); // the header itself is dropped
+    expect(t.scopes).toEqual(["character"]);
+  });
+
+  it("catches a comparison-form inline example (`monthly_income > 10`)", () => {
+    const log = "----\nmonthly_income - Check income\nmonthly_income > 10\nTraits: <, <=, =\n----\n";
+    const [t] = parseLog(log, "trigger");
+    expect(t.usage).toBe("monthly_income > 10");
+    expect(t.doc).toBe("Check income");
   });
 });
 
@@ -52,10 +114,12 @@ describe("loadTokenData caching", () => {
     const first = loadTokenData(FIXTURE_LOGS, cacheFile);
     expect(first.fromCache).toBe(false);
     expect(first.tokens.length).toBeGreaterThan(0);
+    expect(first.templates.length).toBeGreaterThan(0);
 
     const second = loadTokenData(FIXTURE_LOGS, cacheFile);
     expect(second.fromCache).toBe(true);
     expect(second.tokens.length).toBe(first.tokens.length);
+    expect(second.templates.map((t) => t.name)).toEqual(first.templates.map((t) => t.name));
 
     const forced = loadTokenData(FIXTURE_LOGS, cacheFile, true);
     expect(forced.fromCache).toBe(false);

@@ -10,8 +10,10 @@
  *
  * Scope (phase 1): structural widgets, boxes with layout policies,
  * flowcontainer, container, margin_widget, scrollarea, textboxes with the
- * calibrated font metrics. NOT yet: template/type/blockoverride resolution,
- * datamodels, nine-slice, states.
+ * calibrated font metrics, template/type/blockoverride resolution.
+ * Phase 2 (presentation, NOT calibrated pixel rules): datamodel-list ghost
+ * placeholders, nine-slice `spriteborder` geometry on fills, and confirmed
+ * exclusion of `state = {}` transition blocks from layout.
  *
  * No `vscode` imports: unit-tested in plain Node (test/guiLayout.test.ts
  * holds the golden fixtures derived from the calibration screenshots).
@@ -40,6 +42,14 @@ export interface Fill {
   texture?: string;
   /** rgba 0..1; rendered = round(v*255), straight sRGB multiply (B1-G). */
   color?: [number, number, number, number];
+  /**
+   * Nine-slice border widths [left, top, right, bottom] in texture pixels,
+   * sourced from the `spriteborder`/`spriteborder_<side>` .gui attributes.
+   * Present => the renderer draws corners unscaled and stretches the edges
+   * (see computeNineSlice). Geometry is deterministic; the values are read
+   * straight from the document, not a calibrated layout rule.
+   */
+  border?: [number, number, number, number];
 }
 
 export interface TextInfo {
@@ -87,7 +97,71 @@ export interface LayoutNode {
   srcPosition?: [number, number];
   /** Raw `size = { w h }` source values, when present (may be % — see sizePct). */
   srcSize?: [number, number];
+  /**
+   * True for placeholder copies of a datamodel item template: the list has no
+   * real runtime data in the preview, so GHOST_COUNT reduced-opacity instances
+   * stand in. Presentation only, propagated to the whole ghost subtree.
+   */
+  ghost?: boolean;
   children: LayoutNode[];
+}
+
+/**
+ * Number of placeholder rows drawn for a datamodel-driven list (unmeasured:
+ * a preview affordance, capped per ghostCount so it never overruns a container
+ * whose own size is known). GHOST_OPACITY is applied by the client renderer.
+ */
+export const GHOST_COUNT = 3;
+export const GHOST_OPACITY = 0.45;
+
+/**
+ * Nine-slice (corneredtiled/corneredstretched) region layout: corners drawn
+ * 1:1, edges stretched on one axis, center on both. Pure deterministic
+ * geometry — border widths come from the .gui `spriteborder` attributes and
+ * the source texture's own pixel size. Returns 9 src->dst blits in row-major
+ * order (TL, T, TR, L, C, R, BL, B, BR); zero-area slices are dropped.
+ * The client renderer mirrors this exactly.
+ */
+export interface NineSliceRegion {
+  sx: number; sy: number; sw: number; sh: number;
+  dx: number; dy: number; dw: number; dh: number;
+}
+export function computeNineSlice(
+  rect: LayoutRect,
+  border: [number, number, number, number],
+  texW: number,
+  texH: number
+): NineSliceRegion[] {
+  // Clamp borders so opposite sides never overlap on a small texture or rect.
+  const bl = Math.max(0, Math.min(border[0], texW, rect.w));
+  const bt = Math.max(0, Math.min(border[1], texH, rect.h));
+  const br = Math.max(0, Math.min(border[2], texW - bl, rect.w - bl));
+  const bb = Math.max(0, Math.min(border[3], texH - bt, rect.h - bt));
+  // Source and destination column/row spans: [start, size] triples.
+  const sCols: [number, number][] = [[0, bl], [bl, texW - bl - br], [texW - br, br]];
+  const sRows: [number, number][] = [[0, bt], [bt, texH - bt - bb], [texH - bb, bb]];
+  const dCols: [number, number][] = [
+    [rect.x, bl],
+    [rect.x + bl, rect.w - bl - br],
+    [rect.x + rect.w - br, br],
+  ];
+  const dRows: [number, number][] = [
+    [rect.y, bt],
+    [rect.y + bt, rect.h - bt - bb],
+    [rect.y + rect.h - bb, bb],
+  ];
+  const out: NineSliceRegion[] = [];
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const [sx, sw] = sCols[c];
+      const [sy, sh] = sRows[r];
+      const [dx, dw] = dCols[c];
+      const [dy, dh] = dRows[r];
+      if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) continue;
+      out.push({ sx, sy, sw, sh, dx, dy, dw, dh });
+    }
+  }
+  return out;
 }
 
 export interface TextMeasurer {
@@ -207,6 +281,12 @@ interface WNode {
   line?: number;
   ownLine: boolean; // line points at this widget's own statement
   bg?: Fill;
+  ghost?: boolean; // placeholder copy of a datamodel item template
+  /**
+   * Resolved item-template widgets from a datamodel container's `item = {}`
+   * block, captured during process() and stamped out as ghost copies.
+   */
+  itemTemplate?: WNode[];
   children: WNode[];
 }
 
@@ -347,6 +427,22 @@ function buildWNode(
         continue;
       }
       if (child) {
+        if (k === "item") {
+          // Datamodel item template: `item = { <widget> }` holds one instance
+          // of the per-row widget (the universal vanilla pattern — verified in
+          // window_character.gui skills hbox + modifiers fixedgridbox: item is
+          // always a plain wrapper whose children are the row widget). Captured
+          // here, stamped out as ghost copies after process().
+          const itemNode = buildWNode(
+            "item",
+            child,
+            { ...ctx, overrides: ov, stack: childStack },
+            line,
+            false
+          );
+          node.itemTemplate = itemNode.children;
+          continue;
+        }
         if (SKIP_SUBTREES.has(k)) {
           continue;
         } else if (k === "background") {
@@ -410,7 +506,46 @@ function buildWNode(
     if (!node.pairs.has("size")) node.pairs.set("size", [45, 45]);
     if (!node.props.has("multiline")) node.props.set("multiline", fakeScalar("yes"));
   }
+
+  // unmeasured: placeholder presentation, not a calibrated layout rule.
+  // A datamodel list has no runtime rows in a static preview, so it would draw
+  // empty. Assumption: each data row is one instance of the `item` template
+  // laid out as a normal child. Stamp GHOST_COUNT (capped) ghost copies so the
+  // container's real layout policy (box/flow stacking) is visible. Reuses the
+  // already-resolved template widgets; no extra expansion machinery.
+  if (node.itemTemplate && node.itemTemplate.length > 0) {
+    for (const t of node.itemTemplate) markGhost(t);
+    const count = ghostCount(node);
+    for (let i = 0; i < count; i++) node.children.push(...node.itemTemplate);
+  }
   return node;
+}
+
+/** Flag a template subtree as a placeholder (non-editable, dimmed by the client). */
+function markGhost(node: WNode): void {
+  node.ghost = true;
+  for (const c of node.children) markGhost(c);
+}
+
+/**
+ * How many ghost rows to draw. GHOST_COUNT, but capped to what the container's
+ * own explicit size can hold on its main axis when both that size and the
+ * item's explicit size are known (so a small fixed list never overruns). Runs
+ * in the build phase, so it uses authored sizes only, no text measurement.
+ */
+function ghostCount(node: WNode): number {
+  const size = explicitSize(node);
+  if (!size || !node.itemTemplate) return GHOST_COUNT;
+  const avail = node.vertical ? size.h : size.w;
+  if (avail <= 0) return GHOST_COUNT;
+  let itemMain = 0;
+  for (const t of node.itemTemplate) {
+    const s = explicitSize(t);
+    if (!s) return GHOST_COUNT; // item bounds unknown: no cap
+    itemMain += node.vertical ? s.h : s.w;
+  }
+  if (itemMain <= 0) return GHOST_COUNT;
+  return Math.max(1, Math.min(GHOST_COUNT, Math.floor(avail / itemMain)));
 }
 
 function fakeScalar(text: string): ScalarNode {
@@ -422,6 +557,8 @@ function fillFrom(block: BlockNode, consts: Map<string, number>, defs: GuiDefs):
   // `background = { using = Background_Area_Dark }` carries its texture via
   // the template; expandWidget with an unknown key just splices templates.
   const { statements } = expandWidget("#background", block, defs);
+  let sprite: number[] | undefined;
+  const side: { l?: number; t?: number; r?: number; b?: number } = {};
   for (const stmt of statements) {
     if (stmt.kind !== "assignment") continue;
     const k = stmt.key.text.toLowerCase();
@@ -433,8 +570,44 @@ function fillFrom(block: BlockNode, consts: Map<string, number>, defs: GuiDefs):
         if (v.length >= 3) fill.color = [v[0], v[1], v[2], v[3] ?? 1];
       }
     }
+    // Nine-slice: `spriteborder = { x y }` (x=left/right, y=top/bottom) plus
+    // per-side scalar overrides. Reachable straight off the background block.
+    if (k === "spriteborder") {
+      const b = blockOf(stmt);
+      if (b) sprite = numbersIn(b, consts);
+    }
+    if (k.startsWith("spriteborder_") && stmt.value?.kind === "scalar") {
+      const v = toNumber(stmt.value.text, consts);
+      if (k === "spriteborder_left") side.l = v;
+      else if (k === "spriteborder_top") side.t = v;
+      else if (k === "spriteborder_right") side.r = v;
+      else if (k === "spriteborder_bottom") side.b = v;
+    }
   }
+  const border = borderTuple(sprite, side);
+  if (border) fill.border = border;
   return fill;
+}
+
+/**
+ * Resolve `spriteborder = { x y }` (x = left & right, y = top & bottom) plus
+ * per-side overrides into [left, top, right, bottom], or undefined when no
+ * border attribute is present.
+ */
+function borderTuple(
+  pair: number[] | undefined,
+  side: { l?: number; t?: number; r?: number; b?: number }
+): [number, number, number, number] | undefined {
+  const any =
+    pair !== undefined ||
+    side.l !== undefined ||
+    side.t !== undefined ||
+    side.r !== undefined ||
+    side.b !== undefined;
+  if (!any) return undefined;
+  const x = pair?.[0] ?? 0;
+  const y = pair?.[1] ?? 0;
+  return [side.l ?? x, side.t ?? y, side.r ?? x, side.b ?? y];
 }
 
 function collectWidgets(statements: Statement[], ctx: BuildCtx): WNode[] {
@@ -631,10 +804,13 @@ function arrange(
     bg: node.bg,
     line: node.line,
     positioned: forced === undefined,
-    editable: node.ownLine && node.line !== undefined,
+    // Ghosts are synthetic placeholders: never draggable/editable even though
+    // the item template statements physically exist in the document.
+    editable: node.ownLine && node.line !== undefined && !node.ghost,
     srcPosition:
       srcPosition && srcPosition.length >= 2 ? [srcPosition[0], srcPosition[1]] : undefined,
     srcSize: srcSize && srcSize.length >= 2 ? [srcSize[0], srcSize[1]] : undefined,
+    ghost: node.ghost ? true : undefined,
     children: [],
   };
   const colorPair = node.pairs.get("color");
@@ -646,7 +822,15 @@ function arrange(
     out.text = textInfo(node, rect, measurer);
     if (color) out.text.color = color;
   } else if (node.props.has("texture") || color) {
-    out.fill = { texture: str(node, "texture"), color };
+    // A widget's own textured fill can carry nine-slice borders directly
+    // (spriteborder is collected into pairs; per-side overrides into props).
+    const border = borderTuple(node.pairs.get("spriteborder"), {
+      l: num(node, "spriteborder_left"),
+      t: num(node, "spriteborder_top"),
+      r: num(node, "spriteborder_right"),
+      b: num(node, "spriteborder_bottom"),
+    });
+    out.fill = { texture: str(node, "texture"), color, border };
   }
 
   switch (node.cls) {

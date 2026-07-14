@@ -6,6 +6,8 @@
  * (ck3.paradoxwikis.com/Mod_structure) cross-checked against 86 real .mod
  * files (launcher-generated + Workshop). No vscode imports: unit-testable.
  */
+import * as fs from "fs";
+import * as path from "path";
 
 export interface DescriptorField {
   key: string;
@@ -289,6 +291,24 @@ export function validateDescriptor(text: string, opts: { isDescriptorFile: boole
   }
 
   return issues;
+}
+
+/**
+ * The mod's display name from `<dir>/descriptor.mod` (`name="..."`), or null
+ * when the file or field is missing/unreadable. Lets UI surfaces say WHICH mod
+ * something comes from ("Community Flavor Pack") instead of a generic "mod".
+ */
+export function readDescriptorName(dir: string): string | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(dir, "descriptor.mod"), "utf8");
+  } catch {
+    return null;
+  }
+  const entry = parseDescriptor(text).find((e) => e.key === "name");
+  if (!entry) return null;
+  const value = entry.value.replace(/^"([^]*)"$/, "$1").trim();
+  return value === "" ? null : value;
 }
 
 /** "1.19.0.6" -> "1.19.*" (the wildcard form that survives hotfixes). */

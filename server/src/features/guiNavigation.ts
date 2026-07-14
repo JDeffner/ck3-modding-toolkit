@@ -27,6 +27,8 @@ export interface GuiPaths {
   gamePath: string | null;
   modPath: string | null;
   parentPaths: string[];
+  /** Engine-layer roots (jomini), lowest FIOS priority. */
+  engineRoots?: string[];
 }
 
 /** Current-document defs (live text, cached parse) + the cached cross-file store. */
@@ -34,7 +36,7 @@ export function guiDefSources(document: TextDocument, paths: GuiPaths): GuiDefs[
   const fsPath = URI.parse(document.uri).fsPath;
   const { result, lineIndex } = getParse(document);
   const docDefs = collectGuiDefsParsed(result.root.statements, undefined, fsPath, lineIndex);
-  return [docDefs, getGuiDefs(paths.gamePath, paths.modPath, paths.parentPaths)];
+  return [docDefs, getGuiDefs(paths.gamePath, paths.modPath, paths.parentPaths, paths.engineRoots)];
 }
 
 function locationAt(file: string, line: number): Location {

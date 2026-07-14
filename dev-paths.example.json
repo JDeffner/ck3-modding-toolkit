@@ -2,5 +2,6 @@
   "gamePath": "C:/Program Files (x86)/Steam/steamapps/common/Crusader Kings III/game",
   "logsPath": "C:/Users/you/Documents/Paradox Interactive/Crusader Kings III/logs",
   "modPath": "C:/Users/you/Documents/Paradox Interactive/Crusader Kings III/mod/your_mod",
-  "corpusPath": "C:/Users/you/Documents/Paradox Interactive/Crusader Kings III/mod/big_corpus_mod"
+  "corpusPath": "C:/Users/you/Documents/Paradox Interactive/Crusader Kings III/mod/big_corpus_mod",
+  "tigerPath": "C:/Tools/ck3-tiger/ck3-tiger.exe"
 }

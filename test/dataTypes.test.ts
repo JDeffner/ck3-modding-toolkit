@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   loadBundledDataTypes,
+  loadDataTypes,
   parseDataTypesDump,
   resolveChainType,
   membersOf,
@@ -20,6 +21,13 @@ import {
 } from "../server/src/features/datafunction";
 import { emptyUsage, harvestLine, parseDataFnExpr, type DataFnUsage } from "../server/src/data/dataFnUsage";
 import { describeDataFn, CURATED_DOCS } from "../server/src/data/dataFnDocs";
+import { loadDataBindingMacros } from "../server/src/data/dataBindingMacros";
+import { DefinitionIndex } from "../server/src/index/indexer";
+import type { Definition } from "../shared/src/types";
+import { devPath } from "./devPaths";
+import * as os from "os";
+import * as fs from "fs";
+import * as path from "path";
 
 /** Usage fixture built by harvesting a handful of realistic vanilla lines. */
 function fixtureUsage(): DataFnUsage {
@@ -104,6 +112,46 @@ describe("DumpDataTypes log parser", () => {
     expect(data.types.get("Character")?.get("IsLandedRuler")?.ret).toBe("bool");
     // Bundled members survive.
     expect(data.types.get("Character")?.get("GetFather")?.ret).toBe("Character");
+  });
+
+  // Real-dump shapes verified against the 1.19 DumpDataTypes output (2026-07-14).
+  const REAL_DUMP = [
+    "Scope.GetFather",
+    "Description: Jomini Script System",
+    "Definition type: Promote",
+    "Return type: Character",
+    "-----------------------",
+    "",
+    // The dump lists some members twice; the [unregistered] Function twin
+    // must not clobber the typed Promote above.
+    "Scope.GetFather",
+    "Definition type: Function",
+    "Return type: [unregistered]",
+    "-----------------------",
+    "",
+    "GetVariableSystem",
+    "Description: Access the global variable system",
+    "Definition type: Global promote",
+    "Return type: VariableSystem",
+    "-----------------------",
+  ].join("\n");
+
+  it("[unregistered] normalizes to null and never clobbers a typed duplicate", () => {
+    const data = parseDataTypesDump(REAL_DUMP);
+    const father = data.types.get("Scope")?.get("GetFather");
+    expect(father?.ret).toBe("Character");
+    // No entry anywhere carries the literal "[unregistered]" as a type.
+    for (const members of data.types.values()) {
+      for (const m of members.values()) expect(m.ret).not.toBe("[unregistered]");
+    }
+    // Duplicates count once.
+    expect(data.count).toBe(2);
+  });
+
+  it("strips the Description: prefix and drops Jomini Script System boilerplate", () => {
+    const data = parseDataTypesDump(REAL_DUMP);
+    expect(data.globals.get("GetVariableSystem")?.desc).toBe("Access the global variable system");
+    expect(data.types.get("Scope")?.get("GetFather")?.desc).toBeUndefined();
   });
 });
 
@@ -208,6 +256,27 @@ describe("datafunction hover", () => {
     expect(provideDataFnHover(data, emptyUsage(), line, 5)).toBeNull();
     const unknown = 'x = "[Bogus.Chain]"';
     expect(provideDataFnHover(data, emptyUsage(), unknown, unknown.indexOf("Chain") + 1)).toBeNull();
+  });
+
+  it("matches members by name when the chain owner does not resolve", () => {
+    // GetDread is a Character member; "Bogus" is not a known start, so the
+    // chain cannot resolve — the hover must still find the member by name.
+    const line = 'x = "[Bogus.GetDread]"';
+    const hover = provideDataFnHover(data, emptyUsage(), line, line.indexOf("GetDread") + 1)!;
+    expect(hover.markdown).toContain("Character.GetDread");
+    expect(hover.markdown).toContain("matched by name");
+  });
+
+  it("phrases the dump hint by what is loaded", () => {
+    const usage = emptyUsage();
+    usage.memberPool.set("MysteryMember", 7);
+    const line = 'x = "[Bogus.MysteryMember]"';
+    const wiki = provideDataFnHover(data, usage, line, line.indexOf("MysteryMember") + 1)!;
+    expect(wiki.markdown).toContain("Run `DumpDataTypes`");
+    const dumped = { ...data, source: "data_types.log" as const };
+    const withDump = provideDataFnHover(dumped, usage, line, line.indexOf("MysteryMember") + 1)!;
+    expect(withDump.markdown).toContain("which is loaded");
+    expect(withDump.markdown).not.toContain("Run `DumpDataTypes`");
   });
 });
 
@@ -363,5 +432,239 @@ describe("deduced descriptions", () => {
     expect(describeDataFn("EqualTo_int32", null)).toContain("equal");
     expect(describeDataFn("ROOT", null)).toContain("Context promote");
     expect(describeDataFn("Self", null)).toBeNull(); // single word, no head verb: stay honest
+  });
+});
+
+describe("data_binding macros promoted into [ … ]", () => {
+  function withMacros() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ck3-macros-"));
+    fs.mkdirSync(path.join(dir, "data_binding"));
+    fs.writeFileSync(
+      path.join(dir, "data_binding", "test.txt"),
+      `macro = {\n\tdescription = "True when the value is zero"\n\tdefinition = "IsZero(Value)"\n\treplace_with = "EqualTo_int32(Value, '(int32)0')"\n}`
+    );
+    const data = loadBundledDataTypes();
+    const added = loadDataBindingMacros([dir], data);
+    return { data, added };
+  }
+
+  it("parses the signature and adds the macro as a global function", () => {
+    const { data, added } = withMacros();
+    expect(added).toBe(1);
+    const macro = data.globals.get("IsZero")!;
+    expect(macro.kind).toBe("function");
+    expect(macro.args).toEqual(["Value"]);
+    expect(macro.src).toBe("macro");
+    expect(macro.desc).toContain("True when the value is zero");
+    expect(macro.desc).toContain("EqualTo_int32");
+  });
+
+  it("appears in [ … ] chain-start completion", () => {
+    const { data } = withMacros();
+    const res = provideDataFnCompletion(data, emptyUsage(), 'text = "[IsZ');
+    expect(res).not.toBeNull();
+    const item = res!.items.find((i) => i.label === "IsZero");
+    expect(item).toBeDefined();
+    expect(item!.detail).toContain("function");
+  });
+
+  it("offers its signature inside the call", () => {
+    const { data } = withMacros();
+    const sig = provideDataFnSignature(data, emptyUsage(), 'text = "[IsZero( ', 17);
+    expect(sig).not.toBeNull();
+    expect(sig!.signatures[0].label).toContain("Value");
+  });
+
+  it("never overwrites a real dump/wiki global of the same name", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ck3-macros-"));
+    fs.mkdirSync(path.join(dir, "data_binding"));
+    fs.writeFileSync(
+      path.join(dir, "data_binding", "test.txt"),
+      `macro = {\n\tdefinition = "GetPlayer(x)"\n\treplace_with = "y"\n}`
+    );
+    const data = loadBundledDataTypes();
+    const before = data.globals.get("GetPlayer");
+    loadDataBindingMacros([dir], data);
+    expect(data.globals.get("GetPlayer")).toBe(before); // unchanged
+    expect(data.globals.get("GetPlayer")!.src).not.toBe("macro");
+  });
+});
+
+/**
+ * Regression for the reported bug: after `GetPlayer.` nothing was suggested.
+ * Root cause was the DumpDataTypes twin — `GetPlayer` is listed both as a
+ * Global promote returning Character and as a Global function returning
+ * "[unregistered]"; the twin clobbered the typed entry, so the chain resolved
+ * to a dead "[unregistered]" type with no members. `insertMember` (38bb775)
+ * keeps the typed survivor; these lock the completion path end to end,
+ * including the user's own nested expression.
+ */
+describe("dot-chain member completion through DumpDataTypes twins", () => {
+  // Mirrors the real dump's twin shape and the user's chain.
+  const TWIN_DUMP = [
+    "GetPlayer",
+    "Definition type: Global promote",
+    "Return type: Character",
+    "-----------------------",
+    "",
+    "GetPlayer",
+    "Definition type: Global function",
+    "Return type: [unregistered]",
+    "-----------------------",
+    "",
+    "Character.MakeScope",
+    "Definition type: Promote",
+    "Return type: Scope",
+    "-----------------------",
+    "",
+    "Character.MakeScope",
+    "Definition type: Function",
+    "Return type: [unregistered]",
+    "-----------------------",
+    "",
+    "Scope.ScriptValue( Arg0 )",
+    "Definition type: Function",
+    "Return type: CFixedPoint",
+    "-----------------------",
+    "",
+    // Registers CFixedPoint as a type (for the cast-completion test below).
+    "CFixedPoint.ToString",
+    "Definition type: Function",
+    "Return type: CString",
+    "-----------------------",
+  ].join("\n");
+  const data = parseDataTypesDump(TWIN_DUMP);
+
+  it("offers members after a global that has an [unregistered] twin", () => {
+    const result = provideDataFnCompletion(data, emptyUsage(), 'visible = "[GetPlayer.')!;
+    expect(result.items.map((i) => i.label)).toContain("MakeScope");
+  });
+
+  it("offers members when the chain is nested inside function args (the user's case)", () => {
+    const nested = 'visible = "[Not( GreaterThan_CFixedPoint( GetPlayer.';
+    const result = provideDataFnCompletion(data, emptyUsage(), nested)!;
+    expect(result.items.map((i) => i.label)).toContain("MakeScope");
+  });
+
+  it("chains on through the promote return type (GetPlayer.MakeScope. → Scope members)", () => {
+    const result = provideDataFnCompletion(data, emptyUsage(), 'visible = "[GetPlayer.MakeScope.')!;
+    expect(result.items.map((i) => i.label)).toContain("ScriptValue");
+  });
+});
+
+describe("index-backed argument completion", () => {
+  function index(defs: Array<Pick<Definition, "name" | "kind" | "source">>): DefinitionIndex {
+    const i = new DefinitionIndex();
+    i.addAll(defs.map((d) => ({ ...d, file: `${d.kind}.txt`, line: 0 })));
+    return i;
+  }
+  const data = loadBundledDataTypes();
+
+  it("ScriptValue('…') offers the mod's own script values, ranked above vanilla literals", () => {
+    const idx = index([
+      { name: "cultivation_gui_core_grade", kind: "script_value", source: "mod" },
+      { name: "vanilla_sv", kind: "script_value", source: "vanilla" },
+    ]);
+    const usage = emptyUsage();
+    harvestLine(usage, "text = \"[Scope.ScriptValue('harvested_lit')]\"", "f.gui", 1);
+    const result = provideDataFnCompletion(
+      data,
+      usage,
+      "visible = \"[GetPlayer.MakeScope.ScriptValue('",
+      idx
+    )!;
+    const labels = result.items.map((i) => i.label);
+    expect(labels).toContain("cultivation_gui_core_grade"); // mod def
+    expect(labels).toContain("vanilla_sv"); // vanilla def
+    expect(labels).toContain("harvested_lit"); // harvested literal, still merged
+    // Mod defs sort first (tier 0), literals next (tier 1), vanilla defs last.
+    const mod = result.items.find((i) => i.label === "cultivation_gui_core_grade")!;
+    const lit = result.items.find((i) => i.label === "harvested_lit")!;
+    const van = result.items.find((i) => i.label === "vanilla_sv")!;
+    expect(mod.sortText! < lit.sortText!).toBe(true);
+    expect(lit.sortText! < van.sortText!).toBe(true);
+    expect(mod.detail).toContain("mod");
+  });
+
+  it("GetTrait('…') completes from the trait index", () => {
+    const idx = index([{ name: "brave", kind: "trait", source: "vanilla" }]);
+    const result = provideDataFnCompletion(data, emptyUsage(), "visible = \"[Character.GetTrait('", idx)!;
+    expect(result.items.map((i) => i.label)).toContain("brave");
+  });
+
+  it("a function with no arg-kind mapping still only offers harvested literals", () => {
+    const idx = index([{ name: "brave", kind: "trait", source: "vanilla" }]);
+    const usage = emptyUsage();
+    harvestLine(usage, "text = \"[Character.GetHouseAspiration('some_aspect')]\"", "f.gui", 1);
+    const result = provideDataFnCompletion(
+      data,
+      usage,
+      "text = \"[Character.GetHouseAspiration('",
+      idx
+    )!;
+    const labels = result.items.map((i) => i.label);
+    expect(labels).toContain("some_aspect");
+    expect(labels).not.toContain("brave"); // trait index must not leak in
+  });
+});
+
+describe("datatype-name completion and hover in cast literals", () => {
+  // CFixedPoint/int32/CString are dump-only types; register a couple here.
+  const CAST_DUMP = [
+    "CFixedPoint.ToString",
+    "Definition type: Function",
+    "Return type: CString",
+    "-----------------------",
+    "",
+    "int32.ToString",
+    "Definition type: Function",
+    "Return type: CString",
+    "-----------------------",
+  ].join("\n");
+  const data = parseDataTypesDump(CAST_DUMP, loadBundledDataTypes());
+
+  it("completes the datatype name inside a cast literal '(…", () => {
+    const line = "visible = \"[Not( GreaterThan_CFixedPoint( GetPlayer.MakeScope.ScriptValue('x'), '(CFixed";
+    const result = provideDataFnCompletion(data, emptyUsage(), line)!;
+    const labels = result.items.map((i) => i.label);
+    expect(labels).toContain("CFixedPoint");
+    expect(labels).not.toContain("Character"); // filtered by the "CFixed" prefix
+  });
+
+  it("offers cast types before the closing paren is typed, then stops", () => {
+    const open = provideDataFnCompletion(data, emptyUsage(), "text = \"[EqualTo_int32( x, '(")!;
+    expect(open.items.map((i) => i.label)).toContain("int32");
+    // Once the cast is closed, the '(int32)' literal is a normal argument again.
+    const closed = provideDataFnCompletion(data, emptyUsage(), "text = \"[EqualTo_int32( x, '(int32)0")!;
+    expect(closed.items.map((i) => i.label)).not.toContain("int32");
+  });
+
+  it("hovers a cast type name as a data type", () => {
+    const line = "visible = \"[GreaterThan_CFixedPoint( GetPlayer.MakeScope.ScriptValue('x'), '(CFixedPoint)0' )]\"";
+    const hover = provideDataFnHover(data, emptyUsage(), line, line.indexOf("CFixedPoint)") + 2)!;
+    expect(hover.markdown).toContain("data type");
+    expect(line.slice(hover.start, hover.end)).toBe("CFixedPoint");
+  });
+});
+
+/**
+ * Dump-dependent regression against the user's actual DumpDataTypes output.
+ * Gated on the logs folder (devPaths.ts) so it runs on the maintainer's machine
+ * and skips in CI, following the corpus-gated test pattern.
+ */
+const LOGS = devPath("logsPath");
+const hasDump = LOGS !== null && fs.existsSync(path.join(LOGS, "data_types"));
+(hasDump ? describe : describe.skip)("real DumpDataTypes: user's expression resolves", () => {
+  const data = loadDataTypes(LOGS);
+
+  it("GetPlayer. offers Character members including MakeScope", () => {
+    const result = provideDataFnCompletion(data, emptyUsage(), 'visible = "[GetPlayer.')!;
+    expect(result.items.length).toBeGreaterThan(100);
+    expect(result.items.map((i) => i.label)).toContain("MakeScope");
+  });
+
+  it("GetPlayer.MakeScope. offers Scope members including ScriptValue", () => {
+    const result = provideDataFnCompletion(data, emptyUsage(), 'visible = "[GetPlayer.MakeScope.')!;
+    expect(result.items.map((i) => i.label)).toContain("ScriptValue");
   });
 });

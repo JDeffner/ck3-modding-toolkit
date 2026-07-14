@@ -21,6 +21,7 @@ import {
   VAR_PREFIX_KINDS,
 } from "../../../shared/src/schema/ck3Schema";
 import { isLocProperty } from "../../../shared/src/locProperties";
+import { classifyKeyword } from "../contextKeywords";
 import type { SchemaData } from "../schema/loader";
 import {
   LineIndex,
@@ -38,13 +39,17 @@ const NOT_A_NAME = new Set(["yes", "no", "this", "root", "prev", "from"]);
 
 const PREFIX_VALUE = /^([a-z_]+):([A-Za-z0-9_\-.']+)/;
 
-const SAVE_SCOPE_KEYS = new Set(["save_scope_as", "save_temporary_scope_as"]);
+/** `save_temporary_value_as` (script-value math) is read back as scope:x too. */
+const SAVE_SCOPE_KEYS = new Set(["save_scope_as", "save_temporary_scope_as", "save_temporary_value_as"]);
 const SAVE_SCOPE_VALUE_KEYS = new Set(["save_scope_value_as", "save_temporary_scope_value_as"]);
 /** `add_character_flag = X` / `add_house_flag = { flag = X … }` — flag declarations. */
 const FLAG_SET_KEY = /^(?:add|set)_[a-z_]*flag$/;
 const LIST_SET_KEYS = new Set(["add_to_list", "add_to_temporary_list"]);
 
 const VAR_PREFIXES = new Set(Object.keys(VAR_PREFIX_KINDS));
+
+/** What a key-position call (`my_effect = yes`) may refer to. */
+const CALL_KINDS = ["scripted_effect", "scripted_trigger", "scripted_modifier"];
 
 export interface ExtractedRefs {
   references: Reference[];
@@ -58,7 +63,11 @@ export function extractReferences(
   content: string,
   file: string,
   source: DefSource,
-  schema: SchemaData
+  schema: SchemaData,
+  /** Engine-token test (script_docs names): call sites of engine effects/
+   * triggers are NOT indexed — they dominate large mods (AGOT: ~800k sites)
+   * and their docs come from tokens, not the index. Absent = index all. */
+  isEngineToken?: (name: string) => boolean
 ): ExtractedRefs {
   const { root } = parseScript(content);
   const lines = new LineIndex(content);
@@ -66,17 +75,20 @@ export function extractReferences(
   const implicitDefs: Definition[] = [];
   const namespaces: string[] = [];
 
-  const pushRef = (name: string, kinds: string[], startOffset: number) => {
+  const pushRef = (name: string, kinds: string[], startOffset: number, call?: boolean, chain?: string) => {
     if (!NAME_OK.test(name) || NOT_A_NAME.has(name)) return;
     const pos = lines.positionAt(startOffset);
-    references.push({
+    const ref: Reference = {
       name,
       kinds,
       file,
       line: pos.line,
       startChar: pos.character,
       endChar: pos.character + name.length,
-    });
+    };
+    if (call) ref.call = true;
+    if (chain !== undefined) ref.chain = chain;
+    references.push(ref);
   };
 
   /** A scalar in value position: prefixed references and dotted chains. */
@@ -108,6 +120,22 @@ export function extractReferences(
     return undefined;
   };
 
+  /** Enclosing key chain below the top-level definition, dotted, outermost
+   * first — the static-resolution input for resolveKeyChainScopes. */
+  const enclosingKeyChain = (ancestors: readonly (AssignmentNode | BlockNode)[]): string => {
+    const chainKeys: string[] = [];
+    let sawTopLevel = false;
+    for (const a of ancestors) {
+      if (a.kind !== "assignment") continue;
+      if (!sawTopLevel) {
+        sawTopLevel = true;
+        continue;
+      }
+      if (!a.key.quoted) chainKeys.push(a.key.text);
+    }
+    return chainKeys.join(".");
+  };
+
   walkStatements(root, (stmt: Statement, ancestors) => {
     if (stmt.kind === "value") {
       if (stmt.value.kind === "scalar") scanValueScalar(stmt.value);
@@ -137,7 +165,10 @@ export function extractReferences(
       return;
     }
 
-    // save_scope_as = my_target  → implicit definition
+    // save_scope_as = my_target  → implicit definition. def.value carries a
+    // discriminated type hint for mod-wide saved-scope typing (varTypes.ts):
+    // "chain:<keys>" = resolve the save site's enclosing key chain statically;
+    // "type:value" = script-value math save (always a value scope).
     if (key !== null && SAVE_SCOPE_KEYS.has(key) && value?.kind === "scalar" && !value.quoted) {
       if (NAME_OK.test(value.text)) {
         const def: Definition = {
@@ -147,6 +178,8 @@ export function extractReferences(
           line: lines.positionAt(value.range.start).line,
           source,
         };
+        def.value =
+          key === "save_temporary_value_as" ? "type:value" : `chain:${enclosingKeyChain(ancestors)}`;
         const container = topLevelName(ancestors);
         if (container !== undefined) def.container = container;
         implicitDefs.push(def);
@@ -172,7 +205,8 @@ export function extractReferences(
           line: lines.positionAt(nameScalar.range.start).line,
           source,
         };
-        if (exprScalar && !exprScalar.quoted) def.value = exprScalar.text;
+        // "expr:<expr>" — typed by resolving the value expression statically.
+        if (exprScalar && !exprScalar.quoted) def.value = `expr:${exprScalar.text}`;
         const container = topLevelName(ancestors);
         if (container !== undefined) def.container = container;
         implicitDefs.push(def);
@@ -202,6 +236,10 @@ export function extractReferences(
           line: lines.positionAt(nameScalar.range.start).line,
           source,
         };
+        // List set-sites carry the enclosing key chain (below the top-level
+        // definition, outermost first) so the item scope can be resolved
+        // statically mod-wide (resolveKeyChainScopes in scopes/inference.ts).
+        if (kind === "list") def.value = enclosingKeyChain(ancestors);
         const container = topLevelName(ancestors);
         if (container !== undefined) def.container = container;
         implicitDefs.push(def);
@@ -267,6 +305,28 @@ export function extractReferences(
       return;
     }
 
+    // Key-position calls (`my_effect = yes`, `my_trigger = { ... }`): indexed
+    // as call references so find-references and rename cover call sites, which
+    // is where scripted effects/triggers/modifiers are actually used. Grammar
+    // keywords and iterator-shaped keys classify away; engine tokens are
+    // filtered by the caller (memory: they dominate large mods). Top-level
+    // keys are definitions, not calls. Excluded from the usage-count ranking
+    // signal via the `call` flag.
+    if (
+      key !== null &&
+      value != null &&
+      ancestors.length > 0 &&
+      !key.includes(".") &&
+      !key.includes(":") &&
+      !key.includes("$") &&
+      classifyKeyword(key) === "unknown" &&
+      !schema.refFields.has(key) &&
+      !isEngineToken?.(key)
+    ) {
+      // The chain lets call-site scope aggregation type the CALLED definition.
+      pushRef(key, CALL_KINDS, stmt.key.range.start, true, enclosingKeyChain(ancestors));
+    }
+
     if (value?.kind === "scalar") {
       scanValueScalar(value);
       if (key !== null && !value.quoted) {
@@ -316,6 +376,8 @@ export function extractReferences(
 export class ReferenceIndex {
   private byName = new Map<string, Reference[]>();
   private byFile = new Map<string, Reference[]>();
+  /** Per-name count of non-call references (the §C2 ranking signal). */
+  private rankCounts = new Map<string, number>();
   revision = 0;
 
   addAll(refs: Reference[]): void {
@@ -323,6 +385,7 @@ export class ReferenceIndex {
       let list = this.byName.get(ref.name);
       if (!list) this.byName.set(ref.name, (list = []));
       list.push(ref);
+      if (!ref.call) this.rankCounts.set(ref.name, (this.rankCounts.get(ref.name) ?? 0) + 1);
       const fkey = normFile(ref.file);
       let flist = this.byFile.get(fkey);
       if (!flist) this.byFile.set(fkey, (flist = []));
@@ -342,6 +405,11 @@ export class ReferenceIndex {
       const filtered = list.filter((r) => r !== ref);
       if (filtered.length === 0) this.byName.delete(ref.name);
       else this.byName.set(ref.name, filtered);
+      if (!ref.call) {
+        const n = (this.rankCounts.get(ref.name) ?? 0) - 1;
+        if (n <= 0) this.rankCounts.delete(ref.name);
+        else this.rankCounts.set(ref.name, n);
+      }
     }
     this.revision++;
   }
@@ -352,11 +420,12 @@ export class ReferenceIndex {
 
   /**
    * How many times `name` is used across mod files (workspace usage count for
-   * ranking, §C2). O(1): the by-name buckets are already the usage lists, so
-   * this is a map hit + length — no scan at request time.
+   * ranking, §C2). O(1) map hit. Call sites are excluded so the ranking signal
+   * is unchanged by call-reference indexing; use `lookup(name).length` for the
+   * user-facing "N references" count.
    */
   usageCount(name: string): number {
-    return this.byName.get(name)?.length ?? 0;
+    return this.rankCounts.get(name) ?? 0;
   }
 
   /** All references in a file. */
@@ -387,6 +456,7 @@ export class ReferenceIndex {
   clear(): void {
     this.byName.clear();
     this.byFile.clear();
+    this.rankCounts.clear();
     this.revision++;
   }
 }

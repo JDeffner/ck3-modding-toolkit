@@ -79,6 +79,11 @@ export const EFFECT_BLOCK_KEYWORDS = new Set<string>([
  * Blocks whose direct content is script-value math: base/add/factor/modifier
  * keys plus iterators — NOT effects or plain triggers. `modifier` children
  * switch back to trigger grammar via TRIGGER_BLOCK_KEYWORDS.
+ *
+ * The math instruction keys themselves are included for their BLOCK form
+ * (`add = { value = x if = { … } }` inside an effect or trigger): a math key
+ * opening a block always contains math, wherever it appears. Scalar forms
+ * (`add = 5`) never enter the block stack, so this cannot misfire there.
  */
 export const VALUE_BLOCK_KEYWORDS = new Set<string>([
   "ai_chance",
@@ -89,6 +94,18 @@ export const VALUE_BLOCK_KEYWORDS = new Set<string>([
   "ai_value",
   "ai_will_revoke_title",
   "join_chance",
+  "value",
+  "add",
+  "subtract",
+  "multiply",
+  "divide",
+  "modulo",
+  "min",
+  "max",
+  "base",
+  "factor",
+  "fixed_range",
+  "integer_range",
 ]);
 
 /**

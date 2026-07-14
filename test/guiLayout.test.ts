@@ -8,7 +8,12 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { computeGuiLayout, type LayoutNode } from "../server/src/gui/layoutEngine";
+import {
+  computeGuiLayout,
+  computeNineSlice,
+  GHOST_COUNT,
+  type LayoutNode,
+} from "../server/src/gui/layoutEngine";
 import { collectGuiDefs, emptyGuiDefs, mergeGuiDefs } from "../server/src/gui/guiDefs";
 import { devPath } from "./devPaths";
 
@@ -566,6 +571,156 @@ types B { type thing = widget { size = { 99 99 } } }`);
       expectRect(root.children[0], 0, 0, 139, 21);
     }
   );
+
+  it.skipIf(!devPath("gamePath"))(
+    "vanilla datamodel window: ghosts appear and the node count stays bounded",
+    () => {
+      const guiDir = path.join(devPath("gamePath")!, "gui");
+      const files: string[] = [];
+      const walk = (dir: string) => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          const p = path.join(dir, e.name);
+          if (e.isDirectory()) walk(p);
+          else if (e.name.endsWith(".gui")) files.push(p);
+        }
+      };
+      walk(guiDir);
+      files.sort();
+      const store = emptyGuiDefs();
+      for (const f of files) mergeGuiDefs(store, collectGuiDefs(fs.readFileSync(f, "utf8")));
+
+      // window_character.gui drives several datamodel lists (GetSkills,
+      // GetTimedModifiers, portrait families) -> ghost rows must materialize.
+      const text = fs.readFileSync(path.join(guiDir, "window_character.gui"), "utf8");
+      const nodes = computeGuiLayout(text, { defs: store, viewport: { w: 1920, h: 1080 } });
+      let total = 0;
+      let ghosts = 0;
+      const visit = (n: LayoutNode) => {
+        total++;
+        if (n.ghost) ghosts++;
+        n.children.forEach(visit);
+      };
+      nodes.forEach(visit);
+      expect(ghosts).toBeGreaterThan(0);
+      // GHOST_COUNT (3) copies per list, capped, must not explode the tree even
+      // with nested datamodels — guards the preview's per-keystroke budget.
+      // window_character (the heaviest vanilla case) measures ~13.5k nodes.
+      expect(total).toBeLessThan(20000);
+    }
+  );
+});
+
+// Phase 2 (Stream C): presentation / deterministic additions. These are NOT
+// calibrated pixel truth — datamodel and state cases assert structure only
+// (documented unmeasured in spec.md); nine-slice geometry is exact math.
+describe("phase 2: datamodel list placeholders (unmeasured presentation)", () => {
+  it("stamps GHOST_COUNT ghost copies of the item template, stacked per policy", () => {
+    const root = lay(`
+widget = { size = { 200 400 }
+	vbox = {
+		datamodel = "[Window.GetItems]"
+		item = {
+			${ICON("size = { 40 30 }")}
+		}
+	}
+}`);
+    const box = root.children[0];
+    expect(box.children).toHaveLength(GHOST_COUNT);
+    for (const c of box.children) {
+      expect(c.ghost).toBe(true);
+      expect(c.editable).toBe(false); // synthetic placeholders are never editable
+    }
+    // vbox stacks the ghosts along y in order (structural, not a pixel rule).
+    const ys = box.children.map((c) => c.rect.y);
+    expect(ys[0]).toBeLessThan(ys[1]);
+    expect(ys[1]).toBeLessThan(ys[2]);
+    box.children.forEach((c) => expect(c.rect.h).toBeCloseTo(30, 0));
+  });
+
+  it("caps ghosts to the container's own explicit size when known", () => {
+    const root = lay(`
+widget = { size = { 500 500 }
+	vbox = {
+		size = { 100 50 }
+		datamodel = "[X]"
+		item = { ${ICON("size = { 40 30 }")} }
+	}
+}`);
+    // authored vbox height 50, item height 30 -> floor(50/30) = 1 ghost row.
+    expect(root.children[0].children).toHaveLength(1);
+    expect(root.children[0].children[0].ghost).toBe(true);
+  });
+});
+
+describe("phase 2: nine-slice spriteborder (deterministic geometry)", () => {
+  it("carries border geometry from a background block", () => {
+    const root = lay(`
+widget = { size = { 100 100 }
+	background = { texture = "bg.dds" spriteborder = { 18 18 } }
+}`);
+    expect(root.bg?.border).toEqual([18, 18, 18, 18]);
+  });
+
+  it("per-side overrides win over the { x y } pair", () => {
+    const root = lay(`
+widget = { size = { 100 100 }
+	background = { texture = "bg.dds" spriteborder = { 10 20 } spriteborder_top = 5 }
+}`);
+    expect(root.bg?.border).toEqual([10, 5, 10, 20]); // [l, t, r, b]
+  });
+
+  it("a widget's own textured fill carries the border", () => {
+    const root = lay(`
+widget = { size = { 200 100 }
+	icon = { size = { 40 40 } texture = "x.dds" spriteborder = { 4 6 } }
+}`);
+    expect(root.children[0].fill?.border).toEqual([4, 6, 4, 6]);
+  });
+
+  it("computeNineSlice: exact 9 regions, corners 1:1, edges/center stretched", () => {
+    const regions = computeNineSlice({ x: 10, y: 20, w: 200, h: 100 }, [8, 8, 8, 8], 40, 30);
+    expect(regions).toHaveLength(9);
+    // top-left corner drawn unscaled
+    expect(regions[0]).toEqual({ sx: 0, sy: 0, sw: 8, sh: 8, dx: 10, dy: 20, dw: 8, dh: 8 });
+    // center stretched on both axes (src 24x14 -> dst 184x84)
+    expect(regions[4]).toEqual({ sx: 8, sy: 8, sw: 24, sh: 14, dx: 18, dy: 28, dw: 184, dh: 84 });
+    // bottom-right corner unscaled, pinned to the far edge
+    expect(regions[8]).toEqual({ sx: 32, sy: 22, sw: 8, sh: 8, dx: 202, dy: 112, dw: 8, dh: 8 });
+  });
+
+  it("computeNineSlice: borders clamp so opposite sides never overlap", () => {
+    // border wider than half the rect: sides clamp, center collapses (dropped).
+    const regions = computeNineSlice({ x: 0, y: 0, w: 10, h: 10 }, [8, 8, 8, 8], 40, 40);
+    for (const r of regions) {
+      expect(r.dw).toBeGreaterThan(0);
+      expect(r.dh).toBeGreaterThan(0);
+    }
+    const totalW = regions.filter((r) => r.dy === 0).reduce((a, r) => a + r.dw, 0);
+    expect(totalW).toBeLessThanOrEqual(10); // never overruns the rect
+  });
+});
+
+describe("phase 2: state blocks excluded from layout", () => {
+  it("base position/size win; state deltas never leak into the rect", () => {
+    const root = lay(`
+widget = { size = { 300 200 }
+	icon = {
+		position = { 10 10 }
+		size = { 40 40 }
+		texture = "x.dds"
+		state = {
+			name = hover
+			position = { 999 999 }
+			size = { 5 5 }
+			alpha = 0
+		}
+	}
+}`);
+    const icon = root.children[0];
+    expectRect(icon, 10, 10, 40, 40); // base values, not the state's 999 / 5
+    expect(icon.fill?.texture).toBe("x.dds");
+    expect(icon.children).toHaveLength(0); // state is not a child widget
+  });
 });
 
 describe("render info", () => {

@@ -53,12 +53,14 @@ function makeToken(
   name: string,
   doc: string,
   scopes: string[],
-  traitLines: string[]
+  traitLines: string[],
+  usage?: string
 ): TokenData {
   const token: TokenData = { name, kind, doc, scopes: scopes.filter((s) => s !== "") };
   // Sections separated by blank lines so consumers can pick out e.g. the Example block.
   const traits = traitLines.filter((t) => t !== "").join("\n\n");
   if (traits) token.traits = traits;
+  if (usage) token.usage = usage;
   return token;
 }
 
@@ -78,10 +80,14 @@ export function parseWikiEffects(md: string): TokenData[] {
     const [name, desc, example, scopes, target] = cells;
     if (!NAME_RE.test(name)) continue;
     tokens.push(
-      makeToken("effect", name, desc, splitScopes(scopes ?? ""), [
-        example ? `Example:\n${example}` : "",
-        target ? `Target: ${target}` : "",
-      ])
+      makeToken(
+        "effect",
+        name,
+        desc,
+        splitScopes(scopes ?? ""),
+        [target ? `Target: ${target}` : ""],
+        example || undefined
+      )
     );
   }
   return tokens;
@@ -96,11 +102,14 @@ export function parseWikiTriggers(md: string): TokenData[] {
     const [name, desc, usage, traits, scopes, targets] = cells;
     if (!NAME_RE.test(name)) continue;
     tokens.push(
-      makeToken("trigger", name, desc, splitScopes(scopes ?? ""), [
-        usage ? `Example:\n${usage}` : "",
-        traits ? `Traits: ${traits}` : "",
-        targets ? `Supported Targets: ${targets}` : "",
-      ])
+      makeToken(
+        "trigger",
+        name,
+        desc,
+        splitScopes(scopes ?? ""),
+        [traits ? `Traits: ${traits}` : "", targets ? `Supported Targets: ${targets}` : ""],
+        usage || undefined
+      )
     );
   }
   return tokens;
@@ -171,10 +180,8 @@ export function mergeWikiTokens(scriptDocs: TokenData[], wiki: TokenData[]): Tok
       continue;
     }
     if (existing.doc === "" && w.doc !== "") existing.doc = w.doc;
-    const example = w.traits?.split("\n\n").find((section) => section.startsWith("Example:"));
-    if (example && !(existing.traits ?? "").includes("Example:")) {
-      existing.traits = existing.traits ? `${existing.traits}\n${example}` : example;
-    }
+    // script_docs is authoritative; the wiki fills a missing syntax example.
+    if (!existing.usage && w.usage) existing.usage = w.usage;
   }
   return merged;
 }

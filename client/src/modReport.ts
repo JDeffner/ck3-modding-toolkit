@@ -12,6 +12,7 @@ import {
   overridesRequest,
   type LocCoverage,
   type ModOverview,
+  type ModScopedParams,
   type OverrideInfo,
 } from "../../shared/src/protocol";
 import type { IndexStats } from "../../shared/src/types";
@@ -31,16 +32,18 @@ function diagnosticsSummary(): string[] {
     .map(([key, n]) => `| ${key} | ${n} |`);
 }
 
-export async function modReportCommand(lc: LanguageClient): Promise<void> {
+export async function modReportCommand(lc: LanguageClient, modRoot: string | null = null): Promise<void> {
+  const params: ModScopedParams = { modRoot };
   const [stats, overview, coverage, overrides] = await Promise.all([
     lc.sendRequest<IndexStats>(indexStatsRequest),
-    lc.sendRequest<ModOverview>(modOverviewRequest),
-    lc.sendRequest<LocCoverage[]>(locCoverageRequest),
-    lc.sendRequest<OverrideInfo[]>(overridesRequest),
+    lc.sendRequest<ModOverview>(modOverviewRequest, params),
+    lc.sendRequest<LocCoverage[]>(locCoverageRequest, params),
+    lc.sendRequest<OverrideInfo[]>(overridesRequest, params),
   ]);
 
   const lines: string[] = [];
   lines.push(`# CK3 Mod Report`, "", `*Generated ${new Date().toLocaleString()}*`, "");
+  if (modRoot) lines.push(`*Mod: ${modRoot}*`, "");
 
   lines.push(`## Content`, "");
   lines.push(`${overview.totalDefs} definitions, ${overview.totalRefs} reference sites in the mod.`, "");

@@ -49,6 +49,16 @@ describe("detectContext", () => {
     expect(ctxAt("weird_custom_block = {\n\t|\n}").context).toBe("unknown");
   });
 
+  it("math keys opening a block yield value context anywhere", () => {
+    // Script-value math embedded in an effect argument.
+    expect(ctxAt("immediate = {\n\tadd_gold = {\n\t\tvalue = {\n\t\t\t|\n\t\t}\n\t}\n}").context).toBe("value");
+    expect(ctxAt("ai_will_do = {\n\tadd = {\n\t\t|\n\t}\n}").context).toBe("value");
+    // limit inside math-if switches back to trigger grammar.
+    expect(
+      ctxAt("some_weight = {\n\tadd = {\n\t\tif = {\n\t\t\tlimit = {\n\t\t\t\t|\n\t\t\t}\n\t\t}\n\t}\n}").context
+    ).toBe("trigger");
+  });
+
   it("handles the brace on the next line", () => {
     expect(ctxAt("trigger =\n{\n\t|\n}").context).toBe("trigger");
   });

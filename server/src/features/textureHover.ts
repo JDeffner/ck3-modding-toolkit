@@ -12,6 +12,7 @@ import * as path from "path";
 import { ddsToPngDataUri } from "../dds";
 import { getLineText } from "../documents";
 import type { Ck3Settings } from "../../../shared/src/protocol";
+import { assetRoots, bareNameBaseDirs } from "./assetPaths";
 
 const DDS_PATH = /[A-Za-z0-9_\-./\\]+\.dds/gi;
 const CACHE_MAX = 100;
@@ -45,7 +46,8 @@ function cachedDataUri(fsPath: string): string | null {
 export function provideTextureHover(
   settings: Ck3Settings,
   document: TextDocument,
-  position: Position
+  position: Position,
+  entryKind?: string | null
 ): Hover | null {
   const lineText = getLineText(document, position.line);
   DDS_PATH.lastIndex = 0;
@@ -80,6 +82,23 @@ export function provideTextureHover(
     const docDir = path.dirname(URI.parse(document.uri).fsPath);
     const full = path.join(docDir, ...rel.split("/"));
     if (fs.existsSync(full)) resolved = { fsPath: full, label: "relative" };
+  }
+  // Bare filename (`icon = cultivation_realm_2.dds`): resolve against the
+  // engine-fixed base dir for this field (trait icon → gfx/interface/icons/traits/).
+  if (!resolved && !rel.includes("/")) {
+    const keyMatch = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"?$/.exec(lineText.slice(0, hit.start));
+    const dirs = keyMatch ? bareNameBaseDirs(entryKind, keyMatch[1]) : null;
+    if (dirs) {
+      outer: for (const { root, label } of assetRoots(settings)) {
+        for (const dir of dirs) {
+          const full = path.join(root, ...dir.split("/"), rel);
+          if (fs.existsSync(full)) {
+            resolved = { fsPath: full, label };
+            break outer;
+          }
+        }
+      }
+    }
   }
   if (!resolved) return null;
 

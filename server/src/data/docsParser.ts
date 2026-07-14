@@ -19,10 +19,17 @@ export { LOG_FILES };
 const SEPARATOR = /^-{4,}\s*$/;
 const NAME_DESC = /^([A-Za-z0-9_.:<>|[\]]+)\s+-\s*(.*)$/;
 const BARE_NAME = /^([A-Za-z0-9_]+)\s*$/;
-// modifiers.log style: "Tag: monthly_income, Categories: character"
-const TAG_LINE = /^Tag:\s*([A-Za-z0-9_.]+)\s*(?:,\s*(.*))?$/;
+// A `usage:` section header; everything until the next metadata line is the example.
+const USAGE_HEADER = /^usage:\s*$/i;
+// An inline syntax example line: `add_hook = { … }`, `<scheme starter> = …`,
+// or a comparison form like `monthly_income > 10`.
+const SYNTAX_LINE = /^(?:<[^>]+>|[A-Za-z_][A-Za-z0-9_]*)\s*(?:[<>]=?|!=|=)/;
+// modifiers.log style: "Tag: monthly_income, Categories: character".
+// `$` admits templated tags ($CULTURE$_opinion); they are split off into
+// DocsLoadResult.templates downstream, never into the concrete token list.
+const TAG_LINE = /^Tag:\s*([A-Za-z0-9_.$]+)\s*(?:,\s*(.*))?$/;
 const SCOPE_LINE = /^(Supported [Ss]copes|Input [Ss]copes|Output [Ss]copes):\s*(.*)$/;
-const META_LINE = /^(Supported [Tt]argets|Targets?|Traits|Categories|Requires [Dd]ata|Wild[ _]?[Cc]ard|Global [Ll]ink):\s*(.*)$/;
+const META_LINE = /^(Supported [Tt]argets|Targets?|Traits|Categories|Use [Aa]reas|Requires [Dd]ata|Wild[ _]?[Cc]ard|Global [Ll]ink):\s*(.*)$/;
 
 export function parseLog(content: string, kind: TokenKind): TokenData[] {
   const tokens: TokenData[] = [];
@@ -30,14 +37,20 @@ export function parseLog(content: string, kind: TokenKind): TokenData[] {
   const lines = content.split(/\r?\n/);
 
   let current: TokenData | null = null;
+  // True once a `usage:` header was seen for the current entry: subsequent
+  // non-metadata lines are captured (with indentation) as the usage example.
+  let inUsage = false;
   const flush = () => {
     if (current && current.name && !seen.has(current.name)) {
       current.doc = current.doc.trim();
       if (current.traits) current.traits = current.traits.trim();
+      if (current.usage) current.usage = current.usage.replace(/^\n+|\s+$/g, "");
+      if (!current.usage) delete current.usage;
       seen.add(current.name);
       tokens.push(current);
     }
     current = null;
+    inUsage = false;
   };
 
   for (const rawLine of lines) {
@@ -47,31 +60,65 @@ export function parseLog(content: string, kind: TokenKind): TokenData[] {
       continue;
     }
     const trimmed = line.trim();
-    if (trimmed === "") continue;
+    if (trimmed === "") {
+      // Blank lines inside a `usage:` block are structural; keep them.
+      if (current && inUsage && current.usage) current.usage += "\n";
+      continue;
+    }
 
-    if (!current) {
-      let m = TAG_LINE.exec(trimmed);
+    // modifiers.log (1.19+) has no dashed separators: every "Tag:" line
+    // begins a new entry. Templated tags ($CULTURE$_opinion) parse like any
+    // other; callers partition them out (script references the expanded
+    // names, so they feed lazy expansion — modifierTemplates.ts).
+    if (trimmed.startsWith("Tag:")) {
+      flush();
+      const m = TAG_LINE.exec(trimmed);
       if (m) {
         current = { name: m[1], kind, doc: "", scopes: [] };
+        inUsage = false;
         if (m[2]) applyMetaLine(current, m[2]);
-        continue;
       }
-      m = NAME_DESC.exec(trimmed);
+      continue;
+    }
+
+    if (!current) {
+      let m = NAME_DESC.exec(trimmed);
       if (m) {
         current = { name: m[1], kind, doc: m[2], scopes: [] };
+        inUsage = false;
         continue;
       }
       m = BARE_NAME.exec(trimmed);
       if (m) {
         current = { name: m[1], kind, doc: "", scopes: [] };
+        inUsage = false;
         continue;
       }
       // Preamble text ("Printing a list of ..."); skip.
       continue;
     }
 
-    if (applyMetaLine(current, trimmed)) continue;
-    // Unrecognized line inside an entry: continuation of the description.
+    // A metadata line ends any open usage capture and is recorded structurally.
+    if (applyMetaLine(current, trimmed)) {
+      inUsage = false;
+      continue;
+    }
+    // `usage:` opens a multi-line syntax block; the header itself is dropped.
+    if (USAGE_HEADER.test(trimmed)) {
+      inUsage = true;
+      continue;
+    }
+    if (inUsage) {
+      current.usage = current.usage ? current.usage + "\n" + line : line;
+      continue;
+    }
+    // A lone inline syntax example (`add_hook = { … }`): the first one becomes
+    // the usage example; anything after it stays prose.
+    if (current.usage === undefined && SYNTAX_LINE.test(trimmed)) {
+      current.usage = trimmed;
+      continue;
+    }
+    // Otherwise: continuation of the description prose.
     current.doc = current.doc === "" ? trimmed : current.doc + "\n" + trimmed;
   }
   flush();
@@ -102,6 +149,8 @@ function applyMetaLine(token: TokenData, line: string): boolean {
 
 export interface DocsLoadResult {
   tokens: TokenData[];
+  /** Templated modifier tags ($CULTURE$_opinion), for lazy expansion. */
+  templates: TokenData[];
   /** mtimeMs per log file found; the cache key. */
   mtimes: Record<string, number>;
   /** Log file names that were missing from logsPath. */
@@ -134,6 +183,7 @@ export function parseOnActionsLog(logsDir: string): Map<string, string> {
 /** Parse the four script_docs logs found in `logsDir`. Missing files are reported, not fatal. */
 export function loadTokenDataFromLogs(logsDir: string): DocsLoadResult {
   const tokens: TokenData[] = [];
+  const templates: TokenData[] = [];
   const mtimes: Record<string, number> = {};
   const missing: string[] = [];
   for (const { file, kind } of LOG_FILES) {
@@ -147,21 +197,27 @@ export function loadTokenDataFromLogs(logsDir: string): DocsLoadResult {
     }
     mtimes[file] = stat.mtimeMs;
     try {
-      tokens.push(...parseLog(fs.readFileSync(full, "utf8"), kind));
+      for (const t of parseLog(fs.readFileSync(full, "utf8"), kind)) {
+        (t.name.includes("$") ? templates : tokens).push(t);
+      }
     } catch {
       missing.push(file);
     }
   }
-  return { tokens, mtimes, missing, fromCache: false };
+  return { tokens, templates, mtimes, missing, fromCache: false };
 }
 
 interface DocsCacheFile {
   cacheFormat: number;
   mtimes: Record<string, number>;
   tokens: TokenData[];
+  templates: TokenData[];
 }
 
-const DOCS_CACHE_FORMAT = 1;
+// Bump when the parsed TokenData shape changes (a stale mtime-keyed cache would
+// otherwise serve old parses). 3: templated modifier tags ($CULTURE$_opinion).
+// 4: added the `usage` field (syntax examples).
+const DOCS_CACHE_FORMAT = 4;
 
 /** Load token data, using the JSON cache when log mtimes are unchanged. */
 export function loadTokenData(logsDir: string, cacheFile: string, forceReparse = false): DocsLoadResult {
@@ -169,7 +225,12 @@ export function loadTokenData(logsDir: string, cacheFile: string, forceReparse =
     const result = loadTokenDataFromLogs(logsDir);
     try {
       fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
-      const payload: DocsCacheFile = { cacheFormat: DOCS_CACHE_FORMAT, mtimes: result.mtimes, tokens: result.tokens };
+      const payload: DocsCacheFile = {
+        cacheFormat: DOCS_CACHE_FORMAT,
+        mtimes: result.mtimes,
+        tokens: result.tokens,
+        templates: result.templates,
+      };
       fs.writeFileSync(cacheFile, JSON.stringify(payload));
     } catch {
       // Cache write failure is non-fatal.
@@ -185,7 +246,7 @@ export function loadTokenData(logsDir: string, cacheFile: string, forceReparse =
   } catch {
     return fresh();
   }
-  if (cached.cacheFormat !== DOCS_CACHE_FORMAT || !cached.tokens || !cached.mtimes) return fresh();
+  if (cached.cacheFormat !== DOCS_CACHE_FORMAT || !cached.tokens || !cached.templates || !cached.mtimes) return fresh();
 
   // Cache is valid only if the exact same set of files exists with the same mtimes.
   const currentMtimes: Record<string, number> = {};
@@ -204,5 +265,5 @@ export function loadTokenData(logsDir: string, cacheFile: string, forceReparse =
     Object.entries(currentMtimes).every(([f, t]) => cached.mtimes[f] === t);
   if (!same) return fresh();
 
-  return { tokens: cached.tokens, mtimes: cached.mtimes, missing, fromCache: true };
+  return { tokens: cached.tokens, templates: cached.templates, mtimes: cached.mtimes, missing, fromCache: true };
 }

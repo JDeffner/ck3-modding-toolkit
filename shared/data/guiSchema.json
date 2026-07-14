@@ -1,6 +1,6 @@
 {
  "meta": {
-  "generated": "2026-07-10",
+  "generated": "2026-07-14",
   "files": 373
  },
  "types": {
@@ -6185,5 +6185,160 @@
   "icon_button_mapmode": 27,
   "spriteborder_right": 26,
   "uppressedframe": 26
- }
+ },
+ "enums": {
+  "align": [
+   "center",
+   "hcenter",
+   "left",
+   "nobaseline",
+   "right",
+   "top",
+   "vcenter"
+  ],
+  "allow_outside": [
+   "no",
+   "yes"
+  ],
+  "autoresize": [
+   "no",
+   "yes"
+  ],
+  "button_ignore": [
+   "none",
+   "right"
+  ],
+  "direction": [
+   "horizontal",
+   "vertical"
+  ],
+  "effectname": [
+   "greyedout",
+   "nohighlight",
+   "pdxguicolorbutton",
+   "pdxguidefault"
+  ],
+  "elide": [
+   "middle",
+   "right"
+  ],
+  "entity_instance": [
+   "ui_bird_flying_01_entity",
+   "ui_cloud_shadows_entity",
+   "ui_flag_blue_entity",
+   "ui_flag_red_entity",
+   "ui_tavern_smoke_large_entity"
+  ],
+  "filter_mouse": [
+   "all",
+   "left",
+   "right"
+  ],
+  "fittype": [
+   "centercrop",
+   "end",
+   "start"
+  ],
+  "focuspolicy": [
+   "all",
+   "click"
+  ],
+  "font": [
+   "standardgamefont",
+   "titlefont"
+  ],
+  "gfxtype": [
+   "buttongfx",
+   "checkbuttongfx",
+   "framedbuttongfx",
+   "framedprogressbargfx",
+   "game_entity_view",
+   "icongfx",
+   "portraitbuttongfx",
+   "togglepushbuttongfx",
+   "updownframedbuttongfx",
+   "videogfx",
+   "windowgfx"
+  ],
+  "ignoreinvisible": [
+   "no",
+   "yes"
+  ],
+  "layer": [
+   "bottom",
+   "confirmation",
+   "debug",
+   "events",
+   "hud_layer",
+   "middle",
+   "top",
+   "windows_layer"
+  ],
+  "layoutanchor": [
+   "bottomleft",
+   "topleft"
+  ],
+  "layoutpolicy_horizontal": [
+   "expanding",
+   "fixed",
+   "growing",
+   "preferred",
+   "shrinking"
+  ],
+  "layoutpolicy_vertical": [
+   "expanding",
+   "fixed",
+   "growing",
+   "preferred"
+  ],
+  "mirror": [
+   "horizontal",
+   "vertical"
+  ],
+  "movable": [
+   "no",
+   "yes"
+  ],
+  "parentanchor": [
+   "bottom",
+   "center",
+   "hcenter",
+   "left",
+   "right",
+   "top",
+   "vcenter"
+  ],
+  "resizable": [
+   "no",
+   "yes"
+  ],
+  "scrollbarpolicy_horizontal": [
+   "always_off",
+   "as_needed"
+  ],
+  "scrollbarpolicy_vertical": [
+   "always_off",
+   "as_needed"
+  ],
+  "spritetype": [
+   "corneredstretched",
+   "corneredtiled"
+  ],
+  "widgetanchor": [
+   "bottom",
+   "center",
+   "hcenter",
+   "left",
+   "right",
+   "top",
+   "vcenter"
+  ]
+ },
+ "enumCombinable": [
+  "align",
+  "filter_mouse",
+  "mirror",
+  "parentanchor",
+  "widgetanchor"
+ ]
 }

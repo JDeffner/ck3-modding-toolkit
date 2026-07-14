@@ -7,7 +7,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { spawn, type ChildProcess } from "child_process";
 import type { Ck3Config } from "../config";
-import { isUnder } from "../config";
+import { isUnder, modRootFor } from "../config";
 import { parseTigerJson, type TigerReport } from "../../../shared/src/tigerParser";
 import {
   isIgnoredByConfig,
@@ -36,12 +36,14 @@ export class TigerRunner implements vscode.Disposable {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private errorNotified = false;
   private rerunRequested = false;
+  /** Mod root of the run queued behind a still-running instance. */
+  private rerunRoot: string | undefined;
 
   constructor(
     private readonly getConfig: () => Ck3Config,
     private readonly log: (msg: string) => void,
-    /** Extra CLI args per run (baseline --suppress, one-shot --unused). */
-    private readonly extraArgs: () => string[] = () => []
+    /** Extra CLI args per run (per-mod baseline --suppress, one-shot --unused). */
+    private readonly extraArgs: (modRoot: string) => string[] = () => []
   ) {
     this.diagnostics = vscode.languages.createDiagnosticCollection("ck3-tiger");
     this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
@@ -72,18 +74,32 @@ export class TigerRunner implements vscode.Disposable {
     this.errorNotified = false;
   }
 
+  /** The mod a run targets: an explicit root, else the mod owning the active
+   * editor's file (multi-mod workspaces), else the primary mod folder. */
+  private resolveRoot(cfg: Ck3Config, explicit?: string): string | null {
+    if (explicit) return explicit;
+    const active = vscode.window.activeTextEditor?.document.uri.fsPath;
+    if (active) {
+      const owner = modRootFor(active, cfg);
+      if (owner) return owner;
+    }
+    return cfg.modPath;
+  }
+
   onDidSaveDocument(doc: vscode.TextDocument): void {
     const cfg = this.getConfig();
     if (cfg.tigerRunOn !== "save") return;
-    if (!cfg.tigerPath || !cfg.modPath) return;
-    if (!isUnder(cfg.modPath, doc.uri.fsPath)) return;
+    if (!cfg.tigerPath) return;
+    // Multi-mod workspaces: validate the mod the saved file belongs to.
+    const root = modRootFor(doc.uri.fsPath, cfg);
+    if (!root) return;
     // Don't even schedule a run for workspaces that are not CK3 mods.
-    if (!fs.existsSync(path.join(cfg.modPath, "descriptor.mod"))) return;
+    if (!fs.existsSync(path.join(root, "descriptor.mod"))) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => this.run(false), DEBOUNCE_MS);
+    this.debounceTimer = setTimeout(() => this.run(false, root), DEBOUNCE_MS);
   }
 
-  run(manual: boolean): void {
+  run(manual: boolean, rootOverride?: string): void {
     const cfg = this.getConfig();
     if (!cfg.tigerPath) {
       if (manual) {
@@ -91,21 +107,22 @@ export class TigerRunner implements vscode.Disposable {
       }
       return;
     }
-    if (!cfg.modPath) {
+    const modRoot = this.resolveRoot(cfg, rootOverride);
+    if (!modRoot) {
       if (manual) void vscode.window.showWarningMessage("CK3: no mod folder (open one or set ck3.modPath).");
       return;
     }
     // tiger refuses folders without a mod descriptor. A manual run gets a clear
     // message; automatic runs (save, config change) skip silently so opening a
     // non-CK3 workspace never spawns tiger or throws errors at the user.
-    if (!fs.existsSync(path.join(cfg.modPath, "descriptor.mod"))) {
+    if (!fs.existsSync(path.join(modRoot, "descriptor.mod"))) {
       if (manual) {
         this.notifyError(
-          `CK3: ck3-tiger needs a descriptor.mod in the mod folder (${cfg.modPath}). ` +
+          `CK3: ck3-tiger needs a descriptor.mod in the mod folder (${modRoot}). ` +
             "Is ck3.modPath pointing at the mod itself? Mods created via the launcher have one."
         );
       } else {
-        this.log(`tiger: skipped, no descriptor.mod in ${cfg.modPath} (not a CK3 mod workspace?)`);
+        this.log(`tiger: skipped, no descriptor.mod in ${modRoot} (not a CK3 mod workspace?)`);
       }
       return;
     }
@@ -113,11 +130,12 @@ export class TigerRunner implements vscode.Disposable {
     // One run at a time: kill a still-running instance before starting anew.
     if (this.child) {
       this.rerunRequested = true;
+      this.rerunRoot = modRoot;
       this.child.kill();
       return;
     }
 
-    const args = ["--json", ...this.extraArgs()];
+    const args = ["--json", ...this.extraArgs(modRoot)];
     if (cfg.gamePath) {
       // tiger's --ck3 wants the install root (".../Crusader Kings III"), while
       // ck3.gamePath points at its game/ data subfolder.
@@ -125,7 +143,7 @@ export class TigerRunner implements vscode.Disposable {
         path.basename(cfg.gamePath).toLowerCase() === "game" ? path.dirname(cfg.gamePath) : cfg.gamePath;
       args.push("--ck3", gameDir);
     }
-    args.push(cfg.modPath);
+    args.push(modRoot);
 
     this.log(`tiger: ${cfg.tigerPath} ${args.join(" ")}`);
     let stdout = "";
@@ -151,7 +169,9 @@ export class TigerRunner implements vscode.Disposable {
       this.showDone(null);
       if (this.rerunRequested) {
         this.rerunRequested = false;
-        this.run(false);
+        const queuedRoot = this.rerunRoot;
+        this.rerunRoot = undefined;
+        this.run(false, queuedRoot);
         return;
       }
       if (signal) return; // killed by us
@@ -165,7 +185,7 @@ export class TigerRunner implements vscode.Disposable {
         );
         return;
       }
-      this.publish(reports, cfg.modPath!);
+      this.publish(reports, modRoot);
       this.showDone(reports.length);
       this.log(`tiger: ${reports.length} report(s)`);
     });
@@ -286,7 +306,13 @@ export class TigerRunner implements vscode.Disposable {
       if (!list) byFile.set(key, (list = []));
       list.push(diag);
     }
-    this.diagnostics.clear();
+    // Replace only this mod's diagnostics: multi-mod workspaces run tiger per
+    // mod, and a run for one mod must not wipe another's results.
+    const stale: vscode.Uri[] = [];
+    this.diagnostics.forEach((uri) => {
+      if (isUnder(modPath, uri.fsPath)) stale.push(uri);
+    });
+    for (const uri of stale) this.diagnostics.delete(uri);
     for (const [uriStr, diags] of byFile) {
       this.diagnostics.set(vscode.Uri.parse(uriStr), diags);
     }

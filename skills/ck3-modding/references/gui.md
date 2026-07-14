@@ -18,6 +18,11 @@ github.com/JDeffner/ck3-modding-toolkit):
   `gui.CreateWidget gui/debug/test_gui.gui test_window`, and run the analyzer
   `docs/gui-designer/calibration/analyze.ps1` on a PNG screenshot.
 
+**Fallback if those `docs/` files aren't installed alongside this skill** (the skill can be
+deployed without the repo): the "Layout semantics" section below carries the load-bearing rules,
+but treat every specific pixel/number as **approximate** and verify it in-game with the test-window
+loop before relying on it.
+
 ## What UI mods can and cannot do
 
 **Can:** restyle, make windows movable/resizable, remove/rearrange elements, add buttons, surface

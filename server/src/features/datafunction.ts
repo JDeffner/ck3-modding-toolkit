@@ -15,9 +15,29 @@ import { CompletionItemKind, type CompletionItem, type SignatureHelp } from "vsc
 import { describeDataFn } from "../data/dataFnDocs";
 import { membersOf, resolveChainType, type DataTypeMember, type DataTypesData } from "../data/dataTypes";
 import type { DataFnUsage } from "../data/dataFnUsage";
+import type { DefinitionIndex } from "../index/indexer";
 import { finalize, MAX_ITEMS, type CompletionResult } from "./completion";
 import { URI } from "vscode-uri";
 import * as path from "path";
+
+/**
+ * Functions whose single quoted argument names a script definition, so the
+ * literal completes from the definition index (the mod's own defs plus vanilla)
+ * rather than only from harvested vanilla literals. Keyed by the function name
+ * (the last chain segment), so it fires for any owner: `Scope.ScriptValue`,
+ * `TopScope.ScriptValue`, `GetPlayer.MakeScope.ScriptValue`, … all map alike.
+ *
+ * Add an entry only when the dump signature or a vanilla example proves the
+ * argument's kind. Verified against the 1.19 DumpDataTypes output:
+ *  - ScriptValue( Arg0 ) → CFixedPoint, macro "Calculates the named script
+ *    value" — Arg0 is a script_value key;
+ *  - GetTrait( Arg0 ) → Trait, "Get the Trait object with the provided key" —
+ *    Arg0 is a trait key.
+ */
+const ARG_INDEX_KIND: Record<string, string> = {
+  ScriptValue: "script_value",
+  GetTrait: "trait",
+};
 
 /**
  * The expression text when `linePrefix` ends inside an unclosed [ ... ], else
@@ -124,6 +144,20 @@ export function openCallAt(expr: string): OpenCall | null {
   return { chain: top.chain, argIndex: top.argIndex, literalPrefix: null };
 }
 
+/**
+ * Text of the unclosed `'...'` literal at the end of `expr`, or null when the
+ * cursor is not inside one. Pairs quotes the same way `openCallAt` does, but
+ * needs no enclosing call — so a cast literal like `'(CFixedPoint` is seen even
+ * when it is not a function argument.
+ */
+export function openLiteralPrefix(expr: string): string | null {
+  let open = -1;
+  for (let i = 0; i < expr.length; i++) {
+    if (expr[i] === "'") open = open === -1 ? i : -1;
+  }
+  return open === -1 ? null : expr.slice(open + 1);
+}
+
 // ---- ranking / rendering helpers ----------------------------------------------
 
 /** Log-bucketed frequency rank: higher vanilla usage sorts first. */
@@ -144,6 +178,7 @@ function usesSuffix(count: number): string {
 const SOURCE_LABEL: Record<string, string> = {
   dump: "your DumpDataTypes log",
   wiki: "bundled wiki tables",
+  macro: "game data_binding macro",
 };
 
 /** Total vanilla-usage count of a name in any role. */
@@ -166,24 +201,68 @@ function memberRank(usage: DataFnUsage, owner: string | null, name: string): num
 export function provideDataFnCompletion(
   data: DataTypesData,
   usage: DataFnUsage,
-  linePrefix: string
+  linePrefix: string,
+  index?: DefinitionIndex
 ): CompletionResult | null {
   const expr = datafunctionExprAt(linePrefix);
   if (expr === null) return null;
 
-  // Inside a '...' literal argument: observed literal values for that function.
+  // Inside a cast literal `'(CFixedPoint)…'`: complete the datatype name. Comes
+  // before the function-argument branch, since the cast sits inside a call too
+  // (`GreaterThan_CFixedPoint( x, '(CFixed` ).
+  const literal = openLiteralPrefix(expr);
+  if (literal !== null && literal.startsWith("(") && !literal.includes(")")) {
+    const partial = literal.slice(1);
+    const items: CompletionItem[] = [...data.types.keys()].map((type) => ({
+      label: type,
+      kind: CompletionItemKind.Class,
+      detail: "datatype (cast)",
+      sortText: type,
+      data: { t: "dfn" },
+    }));
+    return finalize(items, partial, MAX_ITEMS);
+  }
+
+  // Inside a '...' literal argument: the definition index for functions whose
+  // argument names a script definition (ScriptValue → the mod's own script
+  // values, first), merged with the observed vanilla literals.
   const call = openCallAt(expr);
   if (call && call.literalPrefix !== null) {
     const fn = call.chain[call.chain.length - 1];
+    const items: CompletionItem[] = [];
+    const seen = new Set<string>();
+    const indexKind = ARG_INDEX_KIND[fn];
+    if (indexKind && index) {
+      const kindLabel = indexKind.replace(/_/g, " ");
+      for (const def of index.entries((d) => d.kind === indexKind)) {
+        if (seen.has(def.name)) continue;
+        seen.add(def.name);
+        const isMod = def.source === "mod";
+        items.push({
+          label: def.name,
+          kind: CompletionItemKind.Value,
+          detail: `${kindLabel} (${def.source})`,
+          // Mod defs first, then vanilla literals (tier 1, below), then the
+          // rest of the index defs (tier 2).
+          sortText: (isMod ? "0" : "2") + def.name,
+          data: { t: "dfn" },
+        });
+      }
+    }
     const lits = usage.literals.get(fn);
-    if (!lits) return { isIncomplete: false, items: [] };
-    const items: CompletionItem[] = [...lits.entries()].map(([value, count]) => ({
-      label: value,
-      kind: CompletionItemKind.Value,
-      detail: `argument of ${fn}${usesSuffix(count)}`,
-      sortText: freq3(count) + value,
-      data: { t: "dfn" },
-    }));
+    if (lits) {
+      for (const [value, count] of lits) {
+        if (seen.has(value)) continue;
+        seen.add(value);
+        items.push({
+          label: value,
+          kind: CompletionItemKind.Value,
+          detail: `argument of ${fn}${usesSuffix(count)}`,
+          sortText: "1" + freq3(count) + value,
+          data: { t: "dfn" },
+        });
+      }
+    }
     return finalize(items, call.literalPrefix, MAX_ITEMS);
   }
 
@@ -225,7 +304,7 @@ export function provideDataFnCompletion(
       if (seen.has(name)) continue;
       seen.add(name);
       const count = usage.starts.get(name) ?? 0;
-      const doc = describeDataFn(name, member);
+      const doc = member.desc ?? describeDataFn(name, member);
       items.push({
         label: name,
         kind: member.kind === "promote" ? CompletionItemKind.Variable : CompletionItemKind.Function,
@@ -365,7 +444,16 @@ function topMemberLines(usage: DataFnUsage, name: string, label: string): string
   return ["", `${label}: ${top.join(" ")}`];
 }
 
-const DUMP_HINT = "*Run `DumpDataTypes` in the game console for the version-exact definition.*";
+/**
+ * Footer for names the loaded tables do not resolve. Which advice applies
+ * depends on what is loaded: without a dump, running DumpDataTypes is the fix;
+ * with one loaded, saying so again would read as "your logs were not found".
+ */
+function dumpHintFor(data: DataTypesData): string {
+  return data.source === "data_types.log"
+    ? "*Not in your `DumpDataTypes` dump (which is loaded) — shown from vanilla usage instead.*"
+    : "*Using the bundled wiki tables. Run `DumpDataTypes` in the game console to load the complete, version-exact definitions.*";
+}
 
 /** Shared hover tail: description, observed literals, vanilla example sites. */
 function usageDetailLines(
@@ -373,13 +461,13 @@ function usageDetailLines(
   name: string,
   desc: string | null | undefined,
   gameRoot: string | null,
-  dumpHint = false
+  dumpHint: string | null = null
 ): string[] {
   const lines: string[] = [];
   if (desc) lines.push("", desc);
   lines.push(...literalLines(usage, name));
   lines.push(...exampleLines(usage, name, gameRoot));
-  if (dumpHint) lines.push("", DUMP_HINT);
+  if (dumpHint) lines.push("", dumpHint);
   return lines;
 }
 
@@ -428,24 +516,23 @@ export function provideDataFnHover(
     const typeMembers = membersOf(data, segment);
     if (typeMembers) {
       lines.push(`\`${segment}\` — data type (${typeMembers.size} known members)`);
-      if (uses > 0) lines.push("", `Used ${uses.toLocaleString("en-US")}× in vanilla gui/localization.`);
-      lines.push(...topMemberLines(usage, segment, "Most-used members"));
+      lines.push(...topMemberLines(usage, segment, "Common members"));
       lines.push(...exampleLines(usage, segment, gameRoot));
     } else {
       const global = data.globals.get(segment);
       if (global) {
         lines.push(`\`${segment}${global.args?.length ? `( ${global.args.join(", ")} )` : ""}\`${global.ret ? ` → \`${global.ret}\`` : ""}`);
-        lines.push("", `global ${global.kind} — ${provenance(global)}${usesSuffix(uses)}`);
+        lines.push("", `global ${global.kind} — ${provenance(global)}`);
         lines.push(...usageDetailLines(usage, segment, global.desc ?? describeDataFn(segment, global), gameRoot));
       } else if (uses > 0) {
         lines.push(`\`${segment}\``);
-        lines.push("", `not in the data-type tables — ${provenance(null)}${usesSuffix(uses)}`);
+        lines.push("", `not in the data-type tables — ${provenance(null)}`);
         const desc = describeDataFn(segment, null);
         if (desc) lines.push("", desc);
         lines.push(...topMemberLines(usage, segment, "Members seen after it"));
         lines.push(...literalLines(usage, segment));
         lines.push(...exampleLines(usage, segment, gameRoot));
-        lines.push("", DUMP_HINT);
+        lines.push("", dumpHintFor(data));
       } else {
         return null;
       }
@@ -453,16 +540,40 @@ export function provideDataFnHover(
   } else {
     const ownerType = resolveChainType(data, segments.slice(0, index));
     const member = ownerType ? membersOf(data, ownerType)?.get(segment) : undefined;
+    // The chain's owner type may not resolve (unknown start, missing return
+    // type) while the member name is still in the tables — match by name so a
+    // loaded dump keeps answering (dump names are near-unique per type).
+    const byName: Array<{ owner: string; member: DataTypeMember }> = [];
+    if (!member) {
+      for (const [typeName, members] of data.types) {
+        const m = members.get(segment);
+        if (m) byName.push({ owner: typeName, member: m });
+        if (byName.length >= 6) break;
+      }
+    }
     if (member && ownerType) {
       lines.push(
         `\`${ownerType}.${segment}${member.args?.length ? `( ${member.args.join(", ")} )` : ""}\`${member.ret ? ` → \`${member.ret}\`` : ""}`
       );
-      lines.push("", `${member.kind} on \`${ownerType}\` — ${provenance(member)}${usesSuffix(uses)}`);
+      lines.push("", `${member.kind} on \`${ownerType}\` — ${provenance(member)}`);
       lines.push(...usageDetailLines(usage, segment, member.desc ?? describeDataFn(segment, member), gameRoot));
+    } else if (byName.length > 0) {
+      const hit = byName[0];
+      lines.push(
+        `\`${hit.owner}.${segment}${hit.member.args?.length ? `( ${hit.member.args.join(", ")} )` : ""}\`${hit.member.ret ? ` → \`${hit.member.ret}\`` : ""}`
+      );
+      lines.push(
+        "",
+        `${hit.member.kind} on \`${hit.owner}\` — ${provenance(hit.member)}, matched by name (the chain before it did not resolve to a type)`
+      );
+      if (byName.length > 1) {
+        lines.push("", `Also defined on: ${byName.slice(1).map((o) => `\`${o.owner}\``).join(" ")}${byName.length >= 6 ? " …" : ""}`);
+      }
+      lines.push(...usageDetailLines(usage, segment, hit.member.desc ?? describeDataFn(segment, hit.member), gameRoot));
     } else if (uses > 0) {
       lines.push(`\`${segment}\``);
-      lines.push("", `member — ${provenance(null)}${usesSuffix(uses)}`);
-      lines.push(...usageDetailLines(usage, segment, describeDataFn(segment, null), gameRoot, /*dumpHint*/ true));
+      lines.push("", `member — ${provenance(null)}`);
+      lines.push(...usageDetailLines(usage, segment, describeDataFn(segment, null), gameRoot, dumpHintFor(data)));
     } else {
       return null;
     }

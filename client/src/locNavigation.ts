@@ -53,12 +53,12 @@ export class LocReferenceTracker {
   }
 }
 
-/** Scan the mod's script files for lines mentioning `key`. Capped, word-boundary matched. */
-export function findScriptReferences(modPath: string, key: string, cap = 20): vscode.Location[] {
+/** Scan the workspace mods' script files for lines mentioning `key`. Capped, word-boundary matched. */
+export function findScriptReferences(modPaths: string[], key: string, cap = 20): vscode.Location[] {
   const results: vscode.Location[] = [];
   const needle = new RegExp(`(?<![A-Za-z0-9_.\\-])${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_.\\-])`);
-  const roots = ["events", "common", "gui", "gfx"]
-    .map((d) => path.join(modPath, d))
+  const roots = modPaths
+    .flatMap((mod) => ["events", "common", "gui", "gfx"].map((d) => path.join(mod, d)))
     .filter((d) => fs.existsSync(d));
   for (const root of roots) {
     for (const file of listFiles(root, ".txt")) {
@@ -96,8 +96,9 @@ export class LocFileDefinitionProvider implements vscode.DefinitionProvider {
     if (recent) {
       return [new vscode.Location(vscode.Uri.file(recent.file), new vscode.Position(recent.line, 0))];
     }
-    const modPath = this.getConfig().modPath;
-    return modPath ? findScriptReferences(modPath, key) : [];
+    const cfg = this.getConfig();
+    const roots = [cfg.modPath, ...cfg.workspaceMods].filter((r): r is string => r !== null);
+    return roots.length > 0 ? findScriptReferences(roots, key) : [];
   }
 }
 
@@ -120,8 +121,9 @@ export async function jumpToScriptReference(
   let location: vscode.Location | undefined;
   if (recent) {
     location = new vscode.Location(vscode.Uri.file(recent.file), new vscode.Position(recent.line, 0));
-  } else if (cfg.modPath) {
-    location = findScriptReferences(cfg.modPath, key, 1)[0];
+  } else {
+    const roots = [cfg.modPath, ...cfg.workspaceMods].filter((r): r is string => r !== null);
+    if (roots.length > 0) location = findScriptReferences(roots, key, 1)[0];
   }
 
   if (!location) {

@@ -16,6 +16,10 @@ export interface Ck3Settings {
   /** Parent/dependency mod roots (load order, base first) indexed as source "parent"
    * — the submod / compatibility-patch workflow. */
   parentPaths: string[];
+  /** Workspace mod roots (subset of parentPaths): mods the user is EDITING in
+   * this workspace, so they get the mod treatment — reference indexing and
+   * reference diagnostics — on top of the parent definition scan. */
+  workspaceMods?: string[];
   locLanguage: string;
   /** Show inferred scope after scope-changing block openers (off by default). */
   scopeInlayHints: boolean;
@@ -92,7 +96,13 @@ export const indexChangedNotification = "ck3/indexChanged";
 
 // ---- overview suite (Phase 4) ------------------------------------------------
 
-/** Request: mod content inventory; no payload -> {@link ModOverview}. */
+/** Shared param for the mod-scoped overview requests: restrict the result to
+ * one workspace mod (absolute root path). Absent/null = all workspace mods. */
+export interface ModScopedParams {
+  modRoot?: string | null;
+}
+
+/** Request: mod content inventory; {@link ModScopedParams} -> {@link ModOverview}. */
 export const modOverviewRequest = "ck3/modOverview";
 export interface OverviewDef {
   name: string;
@@ -111,7 +121,7 @@ export interface ModOverview {
   totalRefs: number;
 }
 
-/** Request: localization coverage; no payload -> {@link LocCoverage}[]. */
+/** Request: localization coverage; {@link ModScopedParams} -> {@link LocCoverage}[]. */
 export const locCoverageRequest = "ck3/locCoverage";
 export interface LocIssue {
   key: string;
@@ -132,10 +142,12 @@ export interface LocCoverage {
   untranslated: LocIssue[];
 }
 
-/** Request: override/conflict map; no payload -> {@link OverrideInfo}[]. */
+/** Request: override/conflict map; {@link ModScopedParams} -> {@link OverrideInfo}[]. */
 export const overridesRequest = "ck3/overrides";
 export interface OverrideSite {
   source: "vanilla" | "parent" | "mod";
+  /** Display label: the owning mod's descriptor name when known, else `source`. */
+  label?: string;
   file: string;
   line: number;
 }
@@ -249,6 +261,12 @@ export interface GuiLayoutFill {
   texture?: string;
   /** rgba 0..1, straight sRGB multiply (rendered = round(v*255)). */
   color?: [number, number, number, number];
+  /**
+   * Nine-slice border widths [left, top, right, bottom] in texture pixels
+   * (from `spriteborder`/`spriteborder_<side>`). Present => draw corners
+   * unscaled, stretch the edges; absent => stretch the whole texture.
+   */
+  border?: [number, number, number, number];
 }
 export interface GuiLayoutText {
   text: string;
@@ -280,6 +298,12 @@ export interface GuiLayoutNode {
   srcPosition?: [number, number];
   /** Raw `size = { w h }` source values, when present. */
   srcSize?: [number, number];
+  /**
+   * Placeholder copy of a datamodel item template (the list has no runtime
+   * rows in a static preview). The renderer draws it at reduced opacity; it is
+   * never editable. Presentation only, not a measured layout rule.
+   */
+  ghost?: boolean;
   children: GuiLayoutNode[];
 }
 export interface GuiLayoutResult {
@@ -323,6 +347,8 @@ export interface EventGraphParams {
   root?: string;
   /** Restrict to an event namespace. */
   namespace?: string;
+  /** Restrict to one workspace mod (absolute root path). */
+  modRoot?: string | null;
   maxNodes?: number;
 }
 export interface EventGraphNode {
@@ -346,4 +372,46 @@ export interface EventGraph {
   nodes: EventGraphNode[];
   edges: EventGraphEdge[];
   truncated: boolean;
+}
+
+/**
+ * Request: dependency explorer for any indexed definition;
+ * {@link DependenciesParams} -> {@link DependenciesResult}. Cursor-driven
+ * (uri + position) or by name (optionally disambiguated by kind).
+ */
+export const dependenciesRequest = "ck3/dependencies";
+export interface DependenciesParams {
+  /** Resolve the definition under this cursor position. */
+  uri?: string;
+  position?: { line: number; character: number };
+  /** Fallback: look the definition up by name (optionally by kind). */
+  name?: string;
+  kind?: string;
+}
+export interface DependencyDef {
+  name: string;
+  kind: string;
+  file: string;
+  /** 0-based. */
+  line: number;
+}
+export interface DependencyItem {
+  name: string;
+  file: string;
+  /** 0-based. */
+  line: number;
+}
+export interface DependencyGroup {
+  kind: string;
+  items: DependencyItem[];
+}
+export interface DependenciesResult {
+  /** The resolved definition, or null when nothing matches the cursor/name. */
+  def: DependencyDef | null;
+  /** Mod definitions/sites that reference `def` (mod files only; vanilla
+   * references aren't indexed — AD-4). Grouped by the containing definition's
+   * kind, else by file. */
+  dependents: DependencyGroup[];
+  /** Named definitions referenced inside `def`'s block, grouped by target kind. */
+  dependencies: DependencyGroup[];
 }

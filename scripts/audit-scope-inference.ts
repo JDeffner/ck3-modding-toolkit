@@ -313,16 +313,21 @@ async function main(): Promise<void> {
       let m: RegExpExecArray | null;
       while ((m = re.exec(scalar.text)) !== null) {
         const name = m[1];
+        const crossFile = ictx.savedScopeTypes?.get(name);
         const status = ambientNames.has(name)
           ? "ambient"
           : saved.has(name)
             ? saved.get(name)
               ? `file-saved → ${[...(saved.get(name) as Set<string>)].join("|")}`
-              : "file-saved → UNKNOWN TYPE"
+              : crossFile
+                ? `file-saved unknown, cross-file → ${[...crossFile].join("|")}`
+                : "file-saved → UNKNOWN TYPE"
             : modWideSaved.has(name)
-              ? "cross-file (type lost)"
+              ? crossFile
+                ? `cross-file → ${[...crossFile].join("|")}`
+                : "cross-file → UNKNOWN TYPE"
               : modValueSaves.has(name)
-                ? "VALUE-SAVED (save_scope_value_as NOT INDEXED)"
+                ? "VALUE-SAVED (not indexed?)"
                 : "UNRESOLVED";
         tally(scopeRefs, `${name} [${status}]`, siteOf(scalar.range.start));
       }

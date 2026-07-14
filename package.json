@@ -2,7 +2,7 @@
   "name": "ck3-modding-toolkit",
   "displayName": "CK3 Modding Toolkit",
   "description": "Crusader Kings III modding toolkit: completion, go-to-definition, hover docs, ck3-tiger diagnostics, inline localization, event graph and GUI preview.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "JDeffner",
   "author": {
     "name": "Joël Deffner"
@@ -138,10 +138,16 @@
         "editor.wordBasedSuggestions": "off"
       },
       "[paradox-loc]": {
-        "editor.wordBasedSuggestions": "off"
+        "editor.wordBasedSuggestions": "off",
+        "editor.quickSuggestions": {
+          "strings": "on"
+        }
       },
       "[paradox-gui]": {
-        "editor.wordBasedSuggestions": "off"
+        "editor.wordBasedSuggestions": "off",
+        "editor.quickSuggestions": {
+          "strings": "on"
+        }
       },
       "[paradox-info]": {
         "editor.wordBasedSuggestions": "off"
@@ -188,6 +194,23 @@
         "icon": "$(new-file)"
       },
       {
+        "command": "ck3.createTranslationMod",
+        "category": "CK3 Localization",
+        "title": "New Translation Mod (translate another mod)"
+      },
+      {
+        "command": "ck3.pickFocusMod",
+        "category": "CK3",
+        "title": "Pick Focus Mod (for the sidebar views)",
+        "icon": "$(folder-library)"
+      },
+      {
+        "command": "ck3.excludeMods",
+        "category": "CK3",
+        "title": "Exclude Workspace Mods from Indexing",
+        "icon": "$(eye-closed)"
+      },
+      {
         "command": "ck3.setup",
         "category": "CK3",
         "title": "Run Setup & Health Check"
@@ -200,7 +223,14 @@
       {
         "command": "ck3.openInfoDocs",
         "category": "CK3",
-        "title": "Open Format Docs (.info) for This File"
+        "title": "Open Format Docs (.info) for This File",
+        "icon": "$(book)"
+      },
+      {
+        "command": "ck3.openVanillaExamples",
+        "category": "CK3",
+        "title": "Open Vanilla Examples",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "ck3.refreshViews",
@@ -213,6 +243,12 @@
         "category": "CK3",
         "title": "Show Event Graph",
         "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "ck3.showDependencies",
+        "category": "CK3",
+        "title": "Show Dependencies of Definition at Cursor",
+        "icon": "$(type-hierarchy-sub)"
       },
       {
         "command": "ck3.showGuiTree",
@@ -390,94 +426,147 @@
         ]
       }
     ],
-    "configuration": {
-      "title": "CK3 Modding Toolkit",
-      "properties": {
-        "ck3.gamePath": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Path to the CK3 game data folder, e.g. `.../steamapps/common/Crusader Kings III/game`. Used for the vanilla definition index and hover/definition on vanilla content."
-        },
-        "ck3.logsPath": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Folder containing the `script_docs` log files (`triggers.log`, `effects.log`, `event_targets.log`, `modifiers.log`). Empty = auto-detect `Documents/Paradox Interactive/Crusader Kings III/logs`."
-        },
-        "ck3.tigerPath": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Path to the `ck3-tiger` binary. Empty = tiger diagnostics disabled."
-        },
-        "ck3.modPath": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Path to the mod folder. Empty = the first workspace folder."
-        },
-        "ck3.parentMods": {
-          "type": "array",
-          "items": {
-            "type": "string"
+    "configuration": [
+      {
+        "title": "Setup",
+        "order": 1,
+        "properties": {
+          "ck3.gamePath": {
+            "type": "string",
+            "default": "",
+            "order": 1,
+            "scope": "machine-overridable",
+            "markdownDescription": "Path to the CK3 game data folder, e.g. `.../steamapps/common/Crusader Kings III/game`. Powers completion, hover and go-to-definition on vanilla content.\n\n**Easiest:** leave empty and run `CK3: Run Setup & Health Check` — it finds the game via Steam and fills this in. Opening the game folder as an extra workspace folder also works."
           },
-          "default": [],
-          "markdownDescription": "Paths to parent/dependency mods (load order, base first) indexed alongside the mod — for submods and compatibility patches. Additional workspace folders that look like CK3 mods are picked up automatically, and `<mod>/.ck3modding/playset.json` still works."
-        },
-        "ck3.locLanguage": {
-          "type": "string",
-          "default": "english",
-          "markdownDescription": "Localization language to index and display (matches `l_<language>` yml files)."
-        },
-        "ck3.tigerRunOn": {
-          "type": "string",
-          "enum": [
-            "save",
-            "manual"
-          ],
-          "default": "manual",
-          "markdownDescription": "When to run ck3-tiger: on every save of a mod script file (debounced), or only via the `CK3 Tiger: Run Validation` command."
-        },
-        "ck3.enableForWorkspace": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Escape hatch: set to false to stop this workspace's txt/yml files from being switched to the CK3 language modes."
-        },
-        "ck3.scopeInlayHints": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Show the inferred scope (e.g. `character`) after scope-changing block openers like `every_vassal = {`. Best-effort inference; display only."
-        },
-        "ck3.diagnostics.ignore": {
-          "type": "array",
-          "items": {
-            "type": "string"
+          "ck3.logsPath": {
+            "type": "string",
+            "default": "",
+            "order": 2,
+            "scope": "machine-overridable",
+            "markdownDescription": "Folder containing the `script_docs` log files (`triggers.log`, `effects.log`, `event_targets.log`, `modifiers.log`). Leave empty to auto-detect `Documents/Paradox Interactive/Crusader Kings III/logs`.\n\nThe logs upgrade the bundled wiki data to your exact game version: launch CK3 with `-debug_mode`, run `script_docs` in the console (\\`), then run `CK3: Reload Game Data (script_docs)`."
           },
-          "default": [],
-          "markdownDescription": "Diagnostic codes to suppress everywhere. Applies to the extension's own structural/localization codes (e.g. `missing-bom`, `unknown-event`) and to ck3-tiger report keys (e.g. `unknown-field`)."
-        },
-        "ck3.diagnostics.ignorePatterns": {
-          "type": "array",
-          "items": {
-            "type": "string"
+          "ck3.tigerPath": {
+            "type": "string",
+            "default": "",
+            "order": 3,
+            "scope": "machine-overridable",
+            "markdownDescription": "Path to your own `ck3-tiger` binary. Leave empty to use the copy installed by `CK3 Tiger: Download or Update Binary` (also offered during Setup)."
+          }
+        }
+      },
+      {
+        "title": "Mods",
+        "order": 2,
+        "properties": {
+          "ck3.modPath": {
+            "type": "string",
+            "default": "",
+            "order": 1,
+            "scope": "machine-overridable",
+            "markdownDescription": "**Leave this empty** unless your mod folder is not part of the workspace. Every workspace folder that is a CK3 mod is detected and fully indexed automatically. Features follow the file you are editing, and the sidebar views follow it too (or a mod you pin via `CK3: Pick Focus Mod`)."
           },
-          "default": [],
-          "markdownDescription": "Glob patterns matched against workspace-relative file paths; all diagnostics (ours and tiger's) in matching files are suppressed. Supports `*` (within a path segment) and `**` (across segments), e.g. `common/**/vendor/*.txt` or `*.generated.txt`."
-        },
-        "ck3.diagnostics.vanilla": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Diagnose files under `ck3.gamePath` (vanilla game content). Off by default: the extension only ever diagnoses your mod's files."
-        },
-        "ck3.trace.server": {
-          "type": "string",
-          "enum": [
-            "off",
-            "messages",
-            "verbose"
-          ],
-          "default": "off",
-          "markdownDescription": "Trace the communication between VS Code and the CK3 language server (for debugging / bug reports)."
+          "ck3.parentMods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 2,
+            "scope": "machine-overridable",
+            "markdownDescription": "Dependency mods your mod builds on, for submods and compatibility patches. Absolute paths in load order, base first.\n\nParents are read-only context: their definitions resolve in completion, hover and navigation, but they are not validated or edited. Do **not** list mods you are editing — open those as workspace folders instead (*File → Add Folder to Workspace*) and they are picked up automatically.\n\nShareable per-mod alternative: `<mod>/.ck3modding/playset.json` with `{ \"parents\": [\"path/to/parent\"] }`."
+          },
+          "ck3.excludedMods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 3,
+            "scope": "machine-overridable",
+            "markdownDescription": "Workspace mod folders to skip entirely (absolute paths). Excluded mods are not indexed: no completion, hover, navigation, diagnostics or views. Useful when the workspace contains mods you are not currently working on.\n\nEasiest via `CK3: Exclude Workspace Mods from Indexing` (also in the sidebar Tools view), which shows a checklist of the detected mods."
+          },
+          "ck3.locLanguage": {
+            "type": "string",
+            "default": "english",
+            "order": 4,
+            "markdownDescription": "Localization language to index and display (matches `l_<language>` yml files), e.g. `english`, `french`, `german`."
+          }
+        }
+      },
+      {
+        "title": "Validation",
+        "order": 3,
+        "properties": {
+          "ck3.tigerRunOn": {
+            "type": "string",
+            "enum": [
+              "save",
+              "manual"
+            ],
+            "enumDescriptions": [
+              "Run on every save of a mod script file (debounced).",
+              "Run only via the 'CK3 Tiger: Run Validation' command."
+            ],
+            "default": "manual",
+            "order": 1,
+            "markdownDescription": "When the ck3-tiger validator runs."
+          },
+          "ck3.diagnostics.ignore": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 2,
+            "markdownDescription": "Diagnostic codes to suppress everywhere. Applies to the extension's own structural/localization codes (e.g. `missing-bom`, `unknown-event`) and to ck3-tiger report keys (e.g. `unknown-field`).\n\nFor single lines, an inline `# ck3m:ignore <code>` comment does the same."
+          },
+          "ck3.diagnostics.ignorePatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 3,
+            "markdownDescription": "Glob patterns matched against workspace-relative file paths; all diagnostics (ours and tiger's) in matching files are suppressed. Supports `*` (within a path segment) and `**` (across segments), e.g. `common/**/vendor/*.txt` or `*.generated.txt`."
+          },
+          "ck3.diagnostics.vanilla": {
+            "type": "boolean",
+            "default": false,
+            "order": 4,
+            "markdownDescription": "Diagnose files under `ck3.gamePath` (vanilla game content). Off by default: the extension only ever diagnoses your mod's files."
+          }
+        }
+      },
+      {
+        "title": "Editor",
+        "order": 4,
+        "properties": {
+          "ck3.scopeInlayHints": {
+            "type": "boolean",
+            "default": false,
+            "order": 1,
+            "markdownDescription": "Show the inferred scope (e.g. `character`) after scope-changing block openers like `every_vassal = {`. Best-effort inference; display only."
+          },
+          "ck3.enableForWorkspace": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "markdownDescription": "Escape hatch: set to false to stop this workspace's txt/yml files from being switched to the CK3 language modes."
+          },
+          "ck3.trace.server": {
+            "type": "string",
+            "enum": [
+              "off",
+              "messages",
+              "verbose"
+            ],
+            "default": "off",
+            "order": 3,
+            "markdownDescription": "Trace the communication between VS Code and the CK3 language server (for debugging / bug reports)."
+          }
         }
       }
-    },
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -518,6 +607,12 @@
           "name": "Overrides & Conflicts",
           "icon": "media/ck3-view.svg",
           "visibility": "collapsed"
+        },
+        {
+          "id": "ck3.dependencies",
+          "name": "Dependencies",
+          "icon": "media/ck3-view.svg",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -529,6 +624,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "ck3.pickFocusMod",
+          "when": "view =~ /^ck3\\.(overview|locCoverage|overrides)$/",
+          "group": "navigation@1"
+        },
         {
           "command": "ck3.refreshViews",
           "when": "view =~ /^ck3\\./",
@@ -572,6 +672,16 @@
           "command": "ck3.showEventGraph",
           "when": "resourceExtname == .txt && resourcePath =~ /events|on_action|decisions/",
           "group": "navigation"
+        },
+        {
+          "command": "ck3.openInfoDocs",
+          "when": "ck3.hasInfoDoc && (resourceLangId == paradox || resourceLangId == paradox-gui || resourceLangId == paradox-loc)",
+          "group": "navigation"
+        },
+        {
+          "command": "ck3.openVanillaExamples",
+          "when": "resourceLangId == paradox-info",
+          "group": "navigation"
         }
       ],
       "explorer/context": [
@@ -610,6 +720,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.3.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.6.0",

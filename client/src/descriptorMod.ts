@@ -8,6 +8,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import type { Ck3Config } from "./config";
+import { looksLikeGameDir } from "./config";
 import {
   DESCRIPTOR_FIELDS,
   DESCRIPTOR_FIELD_MAP,
@@ -267,6 +268,13 @@ export function registerDescriptorMod(
     if (!modPath) return;
     const descriptorPath = path.join(modPath, "descriptor.mod");
     const descriptorUri = vscode.Uri.file(descriptorPath);
+
+    // A game install shares the mod content dirs but is not a mod: never demand
+    // a descriptor for it, even if it slipped through as modPath.
+    if (looksLikeGameDir(modPath)) {
+      diagnostics.delete(descriptorUri);
+      return;
+    }
 
     if (fs.existsSync(descriptorPath)) {
       missingNotified = false;

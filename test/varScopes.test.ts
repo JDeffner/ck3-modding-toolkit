@@ -9,8 +9,13 @@
 import { describe, expect, it } from "vitest";
 import { parseScript } from "../server/src/parser";
 import { ScopeModel } from "../server/src/scopes/model";
-import { collectSavedScopeTypes, inferScopeAt, type InferenceContext } from "../server/src/scopes/inference";
-import { buildVariableTypes, resolveValueExpr } from "../server/src/scopes/varTypes";
+import {
+  collectSavedScopeTypes,
+  inferScopeAt,
+  resolveKeyChainScopes,
+  type InferenceContext,
+} from "../server/src/scopes/inference";
+import { buildCallSiteScopes, buildVariableTypes, resolveValueExpr } from "../server/src/scopes/varTypes";
 import { extractReferences } from "../server/src/index/references";
 import { loadSchema } from "../server/src/schema/loader";
 import type { Ck3SchemaEntry } from "../shared/src/schema/types";
@@ -263,11 +268,16 @@ describe("reference extraction: variable namespaces", () => {
     expect(baseDef?.value).toBeUndefined();
   });
 
-  it("indexes save_scope_value_as as a saved_scope definition", () => {
+  it("indexes save_scope_value_as as a saved_scope definition with an expr hint", () => {
     const { implicitDefs } = extract("eff = {\n\tsave_scope_value_as = { name = wealth value = 42 }\n}");
     const def = implicitDefs.find((d) => d.name === "wealth");
     expect(def?.kind).toBe("saved_scope");
-    expect(def?.value).toBe("42");
+    expect(def?.value).toBe("expr:42");
+  });
+
+  it("save_scope_as sites carry their enclosing key chain as a hint", () => {
+    const { implicitDefs } = extract("eff = {\n\tliege = {\n\t\tsave_scope_as = boss\n\t}\n}");
+    expect(implicitDefs.find((d) => d.name === "boss")?.value).toBe("chain:liege");
   });
 
   it("variable reads reference the right namespaces", () => {
@@ -294,5 +304,171 @@ describe("reference extraction: variable namespaces", () => {
     const byName = new Map(references.map((r) => [r.name, r.kinds]));
     expect(byName.get("a")).toEqual(["variable", "variable_list"]);
     expect(byName.get("b")).toEqual(["local_variable", "local_variable_list"]);
+  });
+
+  it("indexes save_temporary_value_as as a saved_scope definition typed value", () => {
+    const { implicitDefs } = extract("val = {\n\tvalue = 5\n\tsave_temporary_value_as = diff\n}");
+    const def = implicitDefs.find((d) => d.name === "diff");
+    expect(def?.kind).toBe("saved_scope");
+    expect(def?.value).toBe("type:value");
+  });
+});
+
+describe("cross-file saved-scope types", () => {
+  const charRoot = () => new Set(["character"]);
+
+  it("buildVariableTypes resolves the three save-form hints", () => {
+    const defs: Definition[] = [
+      { name: "boss", kind: "saved_scope", file: "a.txt", line: 0, source: "mod", value: "chain:liege" },
+      { name: "wealth", kind: "saved_scope", file: "a.txt", line: 1, source: "mod", value: "expr:42" },
+      { name: "diff", kind: "saved_scope", file: "b.txt", line: 0, source: "mod", value: "type:value" },
+    ];
+    const info = buildVariableTypes(defs, model, charRoot);
+    expect(info.savedScopeTypes.get("boss")).toEqual(new Set(["character"]));
+    expect(info.savedScopeTypes.get("wealth")).toEqual(new Set(["value"]));
+    expect(info.savedScopeTypes.get("diff")).toEqual(new Set(["value"]));
+  });
+
+  it("conflicting or unhinted save sites poison to unknown", () => {
+    const defs: Definition[] = [
+      { name: "x", kind: "saved_scope", file: "a.txt", line: 0, source: "mod", value: "chain:liege" },
+      { name: "x", kind: "saved_scope", file: "b.txt", line: 0, source: "mod" },
+    ];
+    expect(buildVariableTypes(defs, model, charRoot).savedScopeTypes.get("x")).toBeNull();
+  });
+
+  it("scope:x saved in another file resolves through ctx.savedScopeTypes", () => {
+    const ctx: InferenceContext = { savedScopeTypes: new Map([["boss", new Set(["character"])]]) };
+    expect(scopesAt("e = {\n\tscope:boss = {\n\t\t|\n\t}\n}", CHARACTER, ctx)).toEqual(["character"]);
+    // Chains keep working through the fallback type.
+    expect(scopesAt("e = {\n\tscope:boss.primary_title = {\n\t\t|\n\t}\n}", CHARACTER, ctx)).toEqual([
+      "landed_title",
+    ]);
+  });
+
+  it("local save sites still win over the mod-wide fallback", () => {
+    const ctx: InferenceContext = { savedScopeTypes: new Map([["boss", new Set(["culture"])]]) };
+    const text = "e = {\n\tliege = { save_scope_as = boss }\n\tscope:boss = {\n\t\t|\n\t}\n}";
+    expect(scopesAt(text, CHARACTER, ctx)).toEqual(["character"]);
+  });
+});
+
+describe("call-site scope aggregation (scripted effects without @scope)", () => {
+  const charRoot = () => new Set(["character"]);
+  const callRef = (name: string, chain: string, file = "events/x.txt") => ({
+    name,
+    kinds: ["scripted_effect"],
+    file,
+    line: 0,
+    startChar: 0,
+    endChar: name.length,
+    call: true as const,
+    chain,
+  });
+
+  it("unions resolved call sites and ignores unresolved ones", () => {
+    const refs = [
+      callRef("my_eff", "immediate"), // character root, transparent chain
+      callRef("my_eff", "immediate.every_held_title"), // landed_title
+      callRef("my_eff", "immediate.scope:mystery"), // unresolved: contributes nothing
+    ];
+    const map = buildCallSiteScopes(refs, model, charRoot);
+    expect(map.get("my_eff")).toEqual(new Set(["character", "landed_title"]));
+  });
+
+  it("names with no resolvable call site stay absent", () => {
+    const map = buildCallSiteScopes([callRef("dark", "immediate.scope:mystery")], model, charRoot);
+    expect(map.has("dark")).toBe(false);
+  });
+
+  it("an untagged scripted effect roots at its aggregated calling scope", () => {
+    const entry = { path: "common/scripted_effects", kind: "scripted_effect" } as Ck3SchemaEntry;
+    const ctx: InferenceContext = {
+      entry,
+      callSiteScopes: new Map([["my_effect", new Set(["province"])]]),
+    };
+    expect(scopesAt("my_effect = {\n\t|\n}", null, ctx)).toEqual(["province"]);
+  });
+
+  it("the @scope tag wins over call-site aggregation", () => {
+    const entry = { path: "common/scripted_effects", kind: "scripted_effect" } as Ck3SchemaEntry;
+    const ctx: InferenceContext = {
+      entry,
+      defScopeTag: (name) => (name === "my_effect" ? new Set(["artifact"]) : null),
+      callSiteScopes: new Map([["my_effect", new Set(["province"])]]),
+    };
+    expect(scopesAt("my_effect = {\n\t|\n}", null, ctx)).toEqual(["artifact"]);
+  });
+});
+
+describe("collectSavedScopeTypes: save_temporary_value_as", () => {
+  it("types script-value saves as value scopes", () => {
+    const text = [
+      "some_value = {",
+      "\tvalue = 10",
+      "\tsubtract = 4",
+      "\tsave_temporary_value_as = diff",
+      "\tif = {",
+      "\t\tlimit = { scope:diff >= 20 }",
+      "\t\tvalue = 5",
+      "\t}",
+      "}",
+    ].join("\n");
+    const saved = collectSavedScopeTypes(parseScript(text), model, CHARACTER);
+    expect(saved.get("diff")).toEqual(new Set(["value"]));
+  });
+});
+
+describe("ad-hoc list item types (add_to_list sites)", () => {
+  const schema = loadSchema(process.cwd());
+  const charRoot = () => new Set(["character"]);
+
+  it("resolveKeyChainScopes walks transparent keys, iterators and links", () => {
+    expect(resolveKeyChainScopes(["option", "every_held_title"], model, CHARACTER)).toEqual(
+      new Set(["landed_title"])
+    );
+    expect(resolveKeyChainScopes([""], model, CHARACTER)).toEqual(new Set(["character"]));
+    expect(resolveKeyChainScopes(["liege.primary_title"], model, CHARACTER)).toEqual(new Set(["landed_title"]));
+  });
+
+  it("resolveKeyChainScopes treats scope:/var: anchors as unknown", () => {
+    expect(resolveKeyChainScopes(["immediate", "scope:target"], model, CHARACTER)).toBeNull();
+    expect(resolveKeyChainScopes(["var:someone"], model, CHARACTER)).toBeNull();
+  });
+
+  it("extractReferences captures the enclosing key chain at add_to_list sites", () => {
+    const { implicitDefs } = extractReferences(
+      "my.1 = {\n\toption = {\n\t\tevery_held_title = {\n\t\t\tadd_to_list = titles\n\t\t}\n\t}\n}",
+      "f:/mod/events/x.txt",
+      "mod",
+      schema
+    );
+    const def = implicitDefs.find((d) => d.name === "titles");
+    expect(def?.kind).toBe("list");
+    expect(def?.value).toBe("option.every_held_title");
+  });
+
+  it("buildVariableTypes resolves ad-hoc list item types from the chain", () => {
+    const defs: Definition[] = [
+      { name: "titles", kind: "list", file: "f.txt", line: 0, source: "mod", value: "option.every_held_title" },
+    ];
+    const info = buildVariableTypes(defs, model, charRoot);
+    expect(info.adhocListItemTypes.get("titles")).toEqual(new Set(["landed_title"]));
+  });
+
+  it("conflicting set-sites poison the item type to unknown", () => {
+    const defs: Definition[] = [
+      { name: "l", kind: "list", file: "f.txt", line: 0, source: "mod", value: "every_held_title" },
+      { name: "l", kind: "list", file: "f.txt", line: 4, source: "mod", value: "immediate.scope:x" },
+    ];
+    const info = buildVariableTypes(defs, model, charRoot);
+    expect(info.adhocListItemTypes.get("l")).toBeNull();
+  });
+
+  it("every_in_list = { list = x } resolves through ctx.adhocListItemTypes", () => {
+    const ctx: InferenceContext = { adhocListItemTypes: new Map([["titles", new Set(["landed_title"])]]) };
+    expect(scopesAt("e = {\n\tevery_in_list = {\n\t\tlist = titles\n\t\t|\n\t}\n}", CHARACTER, ctx)).toEqual([
+      "landed_title",
+    ]);
   });
 });

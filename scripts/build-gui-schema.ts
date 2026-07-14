@@ -21,6 +21,49 @@ const MAX_PROPS_PER_TYPE = 100;
 const MIN_TYPE_COUNT = 2;
 const MIN_PROP_COUNT = 2;
 
+// --- Enum-value harvest thresholds (see header + report) ------------------
+// A property qualifies as an enum only if EVERY observed scalar value (each
+// `|`-segment) is a bare lowercase word token (NAME_OK) — i.e. the property is
+// never seen holding a number, quoted string, path, %-size or [datafunction].
+// Of the surviving tokens we keep those seen ≥ MIN_ENUM_VALUE_COUNT times, and
+// accept the property when the kept set has 2..MAX_ENUM_VALUES members.
+const MIN_ENUM_VALUE_COUNT = 3;
+const MAX_ENUM_VALUES = 30;
+const MIN_ENUM_DISTINCT = 2;
+// A tiny fraction of dirty values is tolerated so a lone typo (vanilla ships
+// `layoutpolicy_horizontal = expanding;`) does not disqualify an otherwise
+// pure enum. Dirty values never enter the value list — only the frequent clean
+// tokens do — so this only widens which PROPERTIES qualify, not their sets.
+const MAX_ENUM_DIRTY_RATIO = 0.01;
+
+interface EnumStat {
+  counts: Map<string, number>;
+  /** Values that were NOT clean enum tokens (numbers, paths, datafunctions…). */
+  dirty: number;
+  /** The property was seen with a `|`-combined value at least once. */
+  combinable: boolean;
+}
+const enumStats = new Map<string, EnumStat>();
+
+function recordValue(key: string, value: string): void {
+  let stat = enumStats.get(key);
+  if (!stat) enumStats.set(key, (stat = { counts: new Map(), dirty: 0, combinable: false }));
+  if (value.length === 0) {
+    stat.dirty++;
+    return;
+  }
+  // Quotes are already stripped from scalar text, so a quoted anchor like
+  // `"top|right"` is tested exactly as its bare form; free text ("My Window")
+  // still fails NAME_OK on its spaces and disqualifies the property.
+  const segments = value.split("|");
+  if (segments.length > 1) stat.combinable = true;
+  if (!segments.every((s) => NAME_OK.test(s))) {
+    stat.dirty++;
+    return;
+  }
+  for (const seg of segments) bump(stat.counts, seg);
+}
+
 /** Attribute blocks (`size = { 100% 100% }`) — data, never widget types. */
 const ATTRIBUTE_BLOCKS = new Set([
   "size", "position", "framesize", "spriteborder", "color", "disabledcolor", "uv_scale",
@@ -60,6 +103,11 @@ function recordBlock(typeName: string, block: BlockNode): void {
     if (!NAME_OK.test(key)) continue;
     bump(bag, key);
     bump(globalProps, key);
+    // Scalar RHS feeds the enum-value harvest (blocks/tagged-blocks are not
+    // enum values). Values keep their original case; anchors etc. are lower.
+    if (child.value && child.value.kind === "scalar") {
+      recordValue(key, child.value.text.toLowerCase());
+    }
   }
 }
 
@@ -135,11 +183,32 @@ const global = Object.fromEntries(
   [...globalProps.entries()].sort((a, b) => b[1] - a[1]).slice(0, 200)
 );
 
+// Enum properties: pure (never dirty) keys whose frequent value tokens form a
+// small bounded set. Values sorted alphabetically for a stable, readable list.
+const enums: Record<string, string[]> = {};
+const enumCombinable: string[] = [];
+for (const [key, stat] of [...enumStats.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+  const cleanObs = [...stat.counts.values()].reduce((a, b) => a + b, 0);
+  if (stat.dirty > (stat.dirty + cleanObs) * MAX_ENUM_DIRTY_RATIO) continue;
+  const kept = [...stat.counts.entries()]
+    .filter(([, n]) => n >= MIN_ENUM_VALUE_COUNT)
+    .map(([v]) => v)
+    .sort();
+  if (kept.length < MIN_ENUM_DISTINCT || kept.length > MAX_ENUM_VALUES) continue;
+  enums[key] = kept;
+  if (stat.combinable) enumCombinable.push(key);
+}
+
 const out = {
   meta: { generated: new Date().toISOString().slice(0, 10), files: files.length },
   types,
   globalProps: global,
+  enums,
+  enumCombinable,
 };
 const target = path.join(__dirname, "..", "shared", "data", "guiSchema.json");
 fs.writeFileSync(target, JSON.stringify(out, null, 1), "utf8");
-console.log(`wrote ${target}: ${Object.keys(types).length} widget types from ${files.length} files`);
+console.log(
+  `wrote ${target}: ${Object.keys(types).length} widget types, ` +
+    `${Object.keys(enums).length} enum properties, from ${files.length} files`
+);

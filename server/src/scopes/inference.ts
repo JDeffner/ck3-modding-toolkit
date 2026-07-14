@@ -33,6 +33,16 @@ export interface InferenceContext {
   varTypes?: ReadonlyMap<string, Set<Scope> | null>;
   /** Variable-list ITEM types (same keying): resolves `every_in_list = { variable = x }`. */
   varListItemTypes?: ReadonlyMap<string, Set<Scope> | null>;
+  /** Ad-hoc list ITEM types keyed by plain list name, resolved from the
+   *  add_to_list/add_to_temporary_list set-sites indexed mod-wide:
+   *  `every_in_list = { list = x }` resolves through it. */
+  adhocListItemTypes?: ReadonlyMap<string, Set<Scope> | null>;
+  /** Saved-scope types merged across all indexed save sites of the workspace
+   *  mods: the fallback for scope: names not saved in the current file. */
+  savedScopeTypes?: ReadonlyMap<string, Set<Scope> | null>;
+  /** Calling scopes of scripted effects/triggers/modifiers aggregated from
+   *  their call sites: the root fallback when no `@scope` tag declares one. */
+  callSiteScopes?: ReadonlyMap<string, Set<Scope>>;
   /** CK3Doc `@scope` tag of a definition (scripted effects/triggers/values):
    *  lets modders declare the calling scope of reusable script. */
   defScopeTag?: (name: string) => Set<Scope> | null;
@@ -123,7 +133,9 @@ export function rootScopesAt(
     return fallback;
   }
   if (SCOPE_TAG_KINDS.has(kind)) {
-    return ctx?.defScopeTag?.(top.key.text) ?? fallback;
+    // The author's @scope tag wins; otherwise the calling scope aggregated
+    // from the mod's call sites of this definition (varTypes.ts).
+    return ctx?.defScopeTag?.(top.key.text) ?? ctx?.callSiteScopes?.get(top.key.text) ?? fallback;
   }
 
   if (top.value?.kind === "block") {
@@ -159,7 +171,8 @@ function structureKeyScope(entry: Ck3SchemaEntry | null | undefined, key: string
 /**
  * Saved-scope types for a file: run the stack walk at each save_scope_as site.
  * One level only (no recursive scope: resolution) to stay cheap and total.
- * `save_scope_value_as` sites save value/boolean/flag scopes.
+ * `save_scope_value_as` sites save value/boolean/flag scopes;
+ * `save_temporary_value_as` (script-value math) always saves a value scope.
  */
 export function collectSavedScopeTypes(
   parse: ParseResult,
@@ -191,6 +204,12 @@ export function collectSavedScopeTypes(
       // `scope:earlier_save = { … }` resolves (ambient names included).
       const inferred = inferScopeAt(parse, stmt.key.range.start, model, rootScopes, result, ctx);
       merge(stmt.value.text, inferred.scopes ? new Set(inferred.scopes) : null);
+      return;
+    }
+    if (key === "save_temporary_value_as") {
+      // Script-value math: saves the current numeric value, read back as scope:x.
+      if (stmt.value?.kind !== "scalar" || stmt.value.quoted) return;
+      merge(stmt.value.text, new Set(["value"]));
       return;
     }
     if (key === "save_scope_value_as" || key === "save_temporary_scope_value_as") {
@@ -262,7 +281,10 @@ export function inferScopeAt(
     if (seg.startsWith("scope:")) {
       const name = seg.slice(6);
       prevStack.push(current);
-      const saved = savedScopes.get(name);
+      // This file's save sites first; scopes saved elsewhere in the mod fall
+      // back to the mod-wide static analysis (`??` also covers a local save
+      // the walk could not type — the global merge includes that site too).
+      const saved = savedScopes.get(name) ?? ctx?.savedScopeTypes?.get(name);
       current = saved ? new Set(saved) : null;
       chain.push(`scope:${name} → ${fmt(current)}`);
       return;
@@ -303,12 +325,17 @@ export function inferScopeAt(
       if (IN_LIST_ITERATOR.test(lower)) {
         // Variable lists carry an item type from their add_to_*_variable_list
         // set-sites: `every_in_list = { variable = x }` resolves through it.
-        // Ad-hoc `list = x` lists stay unknown.
+        // Ad-hoc `list = x` lists resolve through the mod-wide add_to_list
+        // site analysis (ctx.adhocListItemTypes).
         let item: Set<Scope> | null = null;
         const varName = node ? childScalar(node, "variable") : null;
         if (varName && ctx?.varListItemTypes) {
           const ns = lower.includes("_in_global_") ? "global_var" : lower.includes("_in_local_") ? "local_var" : "var";
           item = ctx.varListItemTypes.get(`${ns}:${varName}`) ?? null;
+        }
+        if (!item) {
+          const listName = node ? childScalar(node, "list") : null;
+          if (listName && ctx?.adhocListItemTypes) item = ctx.adhocListItemTypes.get(listName) ?? null;
         }
         prevStack.push(current);
         current = item ? new Set(item) : null;
@@ -347,6 +374,84 @@ export function inferScopeAt(
     apply(node && node.kind === "assignment" ? node.key.text : "<anon>", node);
   }
   return { scopes: current, chain };
+}
+
+/**
+ * Statically resolve a chain of enclosing block keys (outermost first, dotted
+ * segments allowed) from a root-scope seed: the resolver behind ad-hoc list
+ * item typing (`add_to_list` sites, varTypes.ts). Mirrors inferScopeAt's key
+ * handling minus the CST/saved-scope/structure context — scope:/var: anchors
+ * resolve to unknown, unknown keys keep the scope (best effort, never fatal).
+ */
+export function resolveKeyChainScopes(
+  segments: readonly string[],
+  model: ScopeModel,
+  rootScopes: Set<Scope> | null
+): Set<Scope> | null {
+  const rootSet = rootScopes ? new Set(rootScopes) : null;
+  let current: Set<Scope> | null = rootSet ? new Set(rootSet) : null;
+  const prevStack: Array<Set<Scope> | null> = [];
+
+  const apply = (segment: string): void => {
+    if (segment.includes(".")) {
+      for (const part of segment.split(".")) apply(part);
+      return;
+    }
+    const seg = segment;
+    const lower = seg.toLowerCase();
+    if (lower === "" || lower === "this") return;
+    if (lower === "root") {
+      prevStack.push(current);
+      current = rootSet ? new Set(rootSet) : null;
+      return;
+    }
+    if (lower === "prev") {
+      current = prevStack.length > 0 ? (prevStack.pop() as Set<Scope> | null) : null;
+      current = current ? new Set(current) : null;
+      return;
+    }
+    if (seg.startsWith("scope:") || VAR_PREFIX.test(seg)) {
+      // Saved scopes / variables are per-file runtime context — unknowable here.
+      prevStack.push(current);
+      current = null;
+      return;
+    }
+    if (MATH_KEYS.has(lower)) return;
+    if (ITERATOR.test(lower)) {
+      if (isExplicitKeyword(lower)) return;
+      const out = model.outputOf(lower);
+      if (out) {
+        prevStack.push(current);
+        current = new Set(out);
+        return;
+      }
+      if (IN_LIST_ITERATOR.test(lower)) {
+        prevStack.push(current);
+        current = null;
+        return;
+      }
+      return;
+    }
+    const link = model.links.get(lower);
+    if (link) {
+      prevStack.push(current);
+      current = link.outputs ? new Set(link.outputs) : null;
+      return;
+    }
+    const colon = seg.indexOf(":");
+    if (colon > 0) {
+      const dataLink = model.links.get(lower.slice(0, colon));
+      if (dataLink) {
+        prevStack.push(current);
+        current = dataLink.outputs ? new Set(dataLink.outputs) : null;
+        return;
+      }
+    }
+    // Grammar keywords and unknown effect/trigger keys keep the scope.
+  };
+
+  for (const seg of segments) apply(seg);
+  return current;
 }
 
 /** Direct child `key = <scalar>` of a statement's block value, if any. */

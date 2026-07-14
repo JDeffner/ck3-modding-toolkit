@@ -61,6 +61,17 @@ my_parent_effect = {
 }
 `;
 
+// The parent is ALSO a workspace mod here (multi-mod workspace): its own
+// references must be indexed, so find-references spans both mods.
+const PARENT_EVENTS_TXT = `namespace = psmoke
+
+psmoke.1 = {
+	immediate = {
+		my_smoke_effect = yes
+	}
+}
+`;
+
 const GUI_TXT = `widget = {
 	name = "smoke_root"
 	flowcontainer = {
@@ -68,6 +79,20 @@ const GUI_TXT = `widget = {
 	}
 }
 `;
+
+const CLOC_TXT = `SmokeCustom = {
+	type = character
+	text = {
+		localization_key = smoke_custom_a
+	}
+}
+`;
+
+const LOC_YML =
+  "﻿l_english:\n" +
+  ' smoke.1.t:0 "Smoke"\n' +
+  ' smoke.1.a:0 "OK"\n' +
+  ' smoke.1.desc:0 "Hi [ROOT.Char.Custom2(\'SmokeCustom\', scope:host)]"\n';
 
 function toUri(p: string): string {
   return "file:///" + p.replace(/\\/g, "/").replace(/^\//, "");
@@ -80,6 +105,8 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
   let parentDir: string;
   let eventsFile: string;
   let eventsUri: string;
+  let locFile: string;
+  let locUri: string;
   const statuses: Ck3StatusPayload[] = [];
 
   beforeAll(async () => {
@@ -93,13 +120,13 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     };
     const fx = (rel: string, content: string) => fxIn(modDir, rel, content);
     fxIn(parentDir, "common/scripted_effects/parent_effects.txt", PARENT_EFFECTS_TXT);
+    fxIn(parentDir, "events/parent_events.txt", PARENT_EVENTS_TXT);
     fx("common/scripted_effects/smoke_effects.txt", EFFECTS_TXT);
     eventsFile = fx("events/smoke_events.txt", EVENTS_TXT);
-    fx(
-      "localization/english/smoke_l_english.yml",
-      "﻿l_english:\n smoke.1.t:0 \"Smoke\"\n smoke.1.a:0 \"OK\"\n"
-    );
+    fx("common/customizable_localization/smoke_cloc.txt", CLOC_TXT);
+    locFile = fx("localization/english/smoke_l_english.yml", LOC_YML);
     eventsUri = toUri(eventsFile);
+    locUri = toUri(locFile);
 
     child = fork(SERVER, ["--node-ipc"], { stdio: ["ignore", "pipe", "pipe", "ipc"], silent: true });
     conn = createMessageConnection(new IPCMessageReader(child), new IPCMessageWriter(child));
@@ -123,6 +150,7 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
           logsPath: null,
           modPath: modDir,
           parentPaths: [parentDir],
+          workspaceMods: [parentDir],
           locLanguage: "english",
           scopeInlayHints: false,
           diagnosticsIgnore: [],
@@ -190,7 +218,7 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(doc).toContain("Gives gold");
   });
 
-  it("hover on the scripted effect shows its card", async () => {
+  it("hover on the scripted effect shows its card with a references link", async () => {
     // "my_smoke_effect" on line 6, character 4.
     const hover = (await conn.sendRequest("textDocument/hover", {
       textDocument: { uri: eventsUri },
@@ -199,6 +227,25 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(hover).not.toBeNull();
     expect(hover!.contents.value).toContain("my_smoke_effect");
     expect(hover!.contents.value).toContain("Gives gold");
+    // Call sites in both workspace mods count, and the count links to the
+    // references view via the trusted command.
+    expect(hover!.contents.value).toContain("2 references");
+    expect(hover!.contents.value).toContain("command:ck3.showReferences");
+  });
+
+  it("F12 in a loc value jumps from Custom2('X') to the custom loc definition", async () => {
+    conn.sendNotification("textDocument/didOpen", {
+      textDocument: { uri: locUri, languageId: "paradox-loc", version: 1, text: LOC_YML },
+    });
+    const line = 3; // the smoke.1.desc line
+    const character = LOC_YML.split("\n")[line].indexOf("SmokeCustom") + 3;
+    const defs = (await conn.sendRequest("textDocument/definition", {
+      textDocument: { uri: locUri },
+      position: { line, character },
+    })) as Array<{ uri: string; range: { start: { line: number } } }>;
+    expect(defs.length).toBeGreaterThan(0);
+    expect(defs[0].uri).toContain("smoke_cloc.txt");
+    expect(defs[0].range.start.line).toBe(0);
   });
 
   it("go-to-definition jumps to the scripted effect", async () => {
@@ -230,6 +277,18 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(result.items.map((i) => i.label)).toContain("my_parent_effect");
   });
 
+  it("find-references spans every workspace mod", async () => {
+    // "my_smoke_effect" on line 6: used in the mod's own event AND in the
+    // second workspace mod's event.
+    const refs = (await conn.sendRequest("textDocument/references", {
+      textDocument: { uri: eventsUri },
+      position: { line: 6, character: 4 },
+      context: { includeDeclaration: false },
+    })) as Array<{ uri: string }>;
+    expect(refs.some((r) => r.uri.includes("smoke_events.txt"))).toBe(true);
+    expect(refs.some((r) => r.uri.includes("parent_events.txt"))).toBe(true);
+  });
+
   it("semantic tokens cover the document", async () => {
     const tokens = (await conn.sendRequest("textDocument/semanticTokens/full", {
       textDocument: { uri: eventsUri },
@@ -251,6 +310,19 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(detail!.options).toHaveLength(1);
     expect(detail!.options[0].name?.key).toBe("smoke.1.a");
     expect(detail!.refs.some((r) => r.kind === "scripted_effect" && r.name === "my_smoke_effect")).toBe(true);
+  });
+
+  it("ck3/dependencies resolves a definition's dependents and dependencies", async () => {
+    const result = (await conn.sendRequest("ck3/dependencies", { name: "smoke.1" })) as {
+      def: { name: string; kind: string } | null;
+      dependents: Array<{ kind: string; items: Array<{ name: string }> }>;
+      dependencies: Array<{ kind: string; items: Array<{ name: string }> }>;
+    };
+    expect(result.def).toMatchObject({ name: "smoke.1", kind: "event" });
+    // smoke.1's immediate calls the mod and parent scripted effects.
+    const effects = result.dependencies.find((g) => g.kind === "scripted_effect");
+    expect(effects).toBeDefined();
+    expect(effects!.items.map((i) => i.name).sort()).toContain("my_smoke_effect");
   });
 
   it("ck3/guiTree answers for gui text", async () => {

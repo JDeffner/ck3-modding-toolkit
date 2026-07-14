@@ -7,11 +7,11 @@ import type { ServerData } from "../serverData";
 
 const DEFS_CAP = 500;
 
-export function computeModOverview(data: ServerData): ModOverview {
+export function computeModOverview(data: ServerData, inFocus: (file: string) => boolean = () => true): ModOverview {
   const byKind = new Map<string, OverviewKind>();
   let total = 0;
   for (const def of data.index.allDefinitions()) {
-    if (def.source !== "mod") continue;
+    if (def.source !== "mod" || !inFocus(def.file)) continue;
     total++;
     let bucket = byKind.get(def.kind);
     if (!bucket) byKind.set(def.kind, (bucket = { kind: def.kind, count: 0, defs: [] }));

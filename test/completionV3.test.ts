@@ -294,3 +294,34 @@ describe("completion — scripted param snippets", () => {
     expect(item.insertText).toBeUndefined();
   });
 });
+
+describe("define: prefix completion", () => {
+  function envWithDefines() {
+    const env = makeEnv();
+    env.data.defines.harvestText(
+      `NGame = {\n\tEND_DATE = "1453.1.1"\n}\nNCharacter = {\n\tMAX_STRESS_LEVEL = 3\n\tMALE_ADULT_AGE = 16\n}`,
+      "F:/game/common/defines/00_defines.txt",
+      "game"
+    );
+    return env;
+  }
+
+  it("define: offers namespaces", () => {
+    const env = envWithDefines();
+    // `‸` avoids clashing with the literal `|` in the define syntax.
+    const { items } = provideAt(env, "e.1 = {\n\timmediate = {\n\t\tadd = define:‸\n\t}\n}", "‸");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("NGame");
+    expect(labels).toContain("NCharacter");
+  });
+
+  it("define:NCharacter| offers that namespace's constants with values", () => {
+    const env = envWithDefines();
+    const { items } = provideAt(env, "e.1 = {\n\timmediate = {\n\t\tadd = define:NCharacter|‸\n\t}\n}", "‸");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("MAX_STRESS_LEVEL");
+    expect(labels).toContain("MALE_ADULT_AGE");
+    expect(labels).not.toContain("END_DATE"); // belongs to NGame
+    expect(items.find((i) => i.label === "MAX_STRESS_LEVEL")!.detail).toBe("= 3");
+  });
+});

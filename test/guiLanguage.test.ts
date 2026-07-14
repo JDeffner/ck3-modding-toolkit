@@ -89,6 +89,43 @@ describe("GUI completion", () => {
     expect(items.map((i) => i.label)).toContain("visible");
     expect(items.map((i) => i.label)).not.toContain("size");
   });
+
+  // `$` is the cursor here since the fixtures contain literal `|` combinators.
+  it("enum property: fresh value after = offers the harvested set", () => {
+    const { items } = provideAt(makeData(), "widget = {\n\tparentanchor = $\n}", "$");
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("top");
+    expect(labels).toContain("hcenter");
+    expect(labels).toContain("center");
+    const top = items.find((i) => i.label === "top")!;
+    expect(top.detail).toContain("parentanchor value");
+    expect(top.detail).toContain("combine with |");
+  });
+
+  it("enum property: after a `|` completes the next segment and drops used flags", () => {
+    const { items } = provideAt(makeData(), "widget = {\n\tparentanchor = top|hcenter|$\n}", "$");
+    const labels = items.map((i) => i.label);
+    // Already-used flags are excluded from the combination.
+    expect(labels).not.toContain("top");
+    expect(labels).not.toContain("hcenter");
+    // Remaining flags are still offered.
+    expect(labels).toContain("bottom");
+    expect(labels).toContain("left");
+  });
+
+  it("enum property: mid-token after `|` filters by the partial segment", () => {
+    const { items, isIncomplete } = provideAt(makeData(), "widget = {\n\tparentanchor = top|hc$\n}", "$");
+    expect(isIncomplete).toBe(true);
+    const labels = items.map((i) => i.label);
+    expect(labels).toContain("hcenter");
+    expect(labels).not.toContain("bottom");
+    expect(labels).not.toContain("top");
+  });
+
+  it("non-enum value positions still stay quiet", () => {
+    const { items } = provideAt(makeData(), "widget = {\n\ttooltip = $\n}", "$");
+    expect(items).toHaveLength(0);
+  });
 });
 
 describe("GUI hover", () => {
@@ -119,5 +156,30 @@ describe("GUI hover", () => {
     expect(hover).not.toBeNull();
     const value = (hover!.contents as { value: string }).value;
     expect(value).toContain("parentanchor");
+  });
+
+  it("enum value hover shows the property, allowed set and combinability", () => {
+    // `parentanchor = top|hcenter`, hover on the `hcenter` token.
+    const text = "widget = {\n\tparentanchor = top|hcenter\n}";
+    const doc = TextDocument.create(uri(), "paradox-gui", 1, text);
+    const hover = provideGuiHover(makeData(), doc, { line: 1, character: 22 });
+    expect(hover).not.toBeNull();
+    const value = (hover!.contents as { value: string }).value;
+    expect(value).toContain("gui enum value");
+    expect(value).toContain("hcenter");
+    expect(value).toContain("parentanchor");
+    expect(value).toContain("bottom"); // full allowed set is listed
+    expect(value).toContain("Combine flags with");
+  });
+
+  it("enum value hover: non-combinable property omits the combine hint", () => {
+    const text = "widget = {\n\tautoresize = yes\n}";
+    const doc = TextDocument.create(uri(), "paradox-gui", 1, text);
+    const hover = provideGuiHover(makeData(), doc, { line: 1, character: 15 });
+    expect(hover).not.toBeNull();
+    const value = (hover!.contents as { value: string }).value;
+    expect(value).toContain("gui enum value");
+    expect(value).toContain("autoresize");
+    expect(value).not.toContain("Combine flags with");
   });
 });

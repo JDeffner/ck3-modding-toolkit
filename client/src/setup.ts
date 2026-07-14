@@ -8,6 +8,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Ck3Config } from "./config";
 import { LOG_FILES } from "../../shared/src/constants";
+import { readDescriptorName } from "../../shared/src/descriptorMod";
 import { findCk3GamePath } from "./steamDetect";
 import { downloadLatestTiger, findDownloadedTiger } from "./tigerDownload";
 
@@ -73,14 +74,18 @@ export async function runSetup(deps: SetupDeps): Promise<void> {
     }
   }
 
-  // 2. Mod folder.
+  // 2. Mod folder(s). Descriptor names, so a 20-mod workspace report reads well.
+  const modLabel = (p: string) => readDescriptorName(p) ?? path.basename(p);
+  const editedMods = [cfg.modPath, ...cfg.workspaceMods].filter((p): p is string => p !== null);
   report.push(
-    cfg.modPath
-      ? `✓ mod folder: ${cfg.modPath}`
-      : "✗ mod folder: open your mod folder as the workspace (or set ck3.modPath)"
+    editedMods.length > 0
+      ? `✓ ${editedMods.length} mod${editedMods.length === 1 ? "" : "s"} (fully indexed and editable; ` +
+          `tiger validates the mod of the file you save): ${editedMods.map(modLabel).join(", ")}`
+      : "✗ mods: open your mod folder(s) — or one folder containing them — as the workspace"
   );
-  if (cfg.parentPaths.length > 0) {
-    report.push(`• parent mods indexed: ${cfg.parentPaths.map((p) => path.basename(p)).join(", ")}`);
+  const depParents = cfg.parentPaths.filter((p) => !cfg.workspaceMods.includes(p));
+  if (depParents.length > 0) {
+    report.push(`• parent mods indexed read-only: ${depParents.map(modLabel).join(", ")}`);
   }
 
   // 3. Logs / script_docs.

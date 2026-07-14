@@ -48,15 +48,18 @@ export function computeLocCoverage(
   data: ServerData,
   modPath: string | null,
   sourceLanguage: string,
-  schemaEntries: Ck3SchemaEntry[]
+  schemaEntries: Ck3SchemaEntry[],
+  inFocus: (file: string) => boolean = () => true
 ): LocCoverage[] {
   if (!modPath) return [];
   const byLang = modLocByLanguage(modPath);
   if (byLang.size === 0) return [];
 
-  // Keys the mod's script uses (recorded loc references), plus schema-required keys.
+  // Keys this mod's script uses (recorded loc references), plus schema-required
+  // keys — both restricted to the focus mod's own files in multi-mod workspaces.
   const referenced = new Map<string, { file: string; line: number }>();
   for (const ref of data.refIndex.allOfKind("loc_key")) {
+    if (!inFocus(ref.file)) continue;
     if (!referenced.has(ref.name)) referenced.set(ref.name, { file: ref.file, line: ref.line });
   }
   const requiredByKind = new Map<string, string[]>();
@@ -64,7 +67,7 @@ export function computeLocCoverage(
     if (e.requiredLoc && e.requiredLoc.length > 0) requiredByKind.set(e.kind, e.requiredLoc);
   }
   for (const def of data.index.allDefinitions()) {
-    if (def.source !== "mod") continue;
+    if (def.source !== "mod" || !inFocus(def.file)) continue;
     const patterns = requiredByKind.get(def.kind);
     if (!patterns) continue;
     for (const p of patterns) {
@@ -73,9 +76,10 @@ export function computeLocCoverage(
     }
   }
 
-  /** Key known to vanilla/parent (in the configured language index)? Then it's an override/covered. */
+  /** Key defined outside this mod (vanilla, parents, other workspace mods, in
+   * the configured language index)? Then it's an override/covered. */
   const inheritedLoc = (key: string): boolean =>
-    data.index.lookupAll(key).some((d) => d.kind === "loc_key" && d.source !== "mod");
+    data.index.lookupAll(key).some((d) => d.kind === "loc_key" && (d.source !== "mod" || !inFocus(d.file)));
 
   const source = byLang.get(sourceLanguage) ?? new Map<string, LocEntrySite>();
   const result: LocCoverage[] = [];

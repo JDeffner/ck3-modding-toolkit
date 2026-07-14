@@ -7,8 +7,11 @@ a game update expect transient false positives (it warns at startup on a version
 
 **Install:** grab the release matching the game version from github.com/amtep/tiger (Windows and
 Linux builds; each ships `ck3-tiger`, the zero-config `ck3-tiger-auto`, a sample `ck3-tiger.conf`,
-and docs `filter.md`/`annotations.md`). `<tiger>` below = wherever it is installed on this
-machine (SKILL.md Step 0). The VS Code extension this repo ships can also download it for you
+and docs `filter.md`/`annotations.md`). `<tiger>` below = the full path to the ck3-tiger
+executable on this machine (SKILL.md Step 0); its sibling files (`ck3-tiger-auto`, `ck3-tiger.conf`,
+`filter.md`) live in the same folder. A Linux build for headless sandbox runs, if installed, sits
+next to the Windows install folder as a `ck3-tiger-linux-<version>` sibling — list the parent
+folder of `<tiger>` to find it. The VS Code extension this repo ships can also download it for you
 (command "CK3 Tiger: Download or Update Binary").
 
 The `.exe` cannot run in a Linux sandbox and the Linux binary cannot run on Windows; pick the one
@@ -26,7 +29,7 @@ ck3-tiger [OPTIONS] <MODPATH>
 mod folder. Standard Windows command:
 
 ```powershell
-& "<tiger>\ck3-tiger.exe" --no-color "<mods>\YourMod.mod" > tiger_report.txt
+& "<tiger>" --no-color "<mods>\YourMod.mod" > tiger_report.txt
 ```
 
 Real flags (do NOT invent others; there are no severity/level CLI flags):
@@ -53,7 +56,7 @@ executable, and run it pointing `--game` at the mounted game dir:
 ```bash
 # paths below use each connected folder's sandbox mount (…/mnt/<folder>); the mount prefix
 # (/sessions/<id>/mnt) changes per session — resolve it from the folder-connection message.
-BIN="/sessions/<id>/mnt/<tiger linux install folder>"
+BIN="/sessions/<id>/mnt/<tiger-linux-folder>"   # the ck3-tiger-linux-<version> folder (see Install above)
 GAME="/sessions/<id>/mnt/<...>/steamapps/common/Crusader Kings III/game"
 MOD="/sessions/<id>/mnt/<your-mod-folder>"          # the mod being validated (must be mounted)
 
@@ -76,7 +79,7 @@ report file it writes.
 
 ```bat
 @echo off
-"<tiger>\ck3-tiger.exe" --no-color "<mods>\YourMod.mod" > "%~dp0tiger_report.txt" 2>&1
+"<tiger>" --no-color "<mods>\YourMod.mod" > "%~dp0tiger_report.txt" 2>&1
 ```
 
 `ck3-tiger-auto.exe` is the zero-config variant (auto-detects everything) if you don't need flags.

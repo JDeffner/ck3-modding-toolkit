@@ -157,6 +157,34 @@ expands, so children end up packed from the box origin).
   rounded up). vcenter centers the line box; ink rows measured 18-28 in a
   40-tall box at fontsize 15. (B4-T6)
 
+## Phase 2 additions (presentation / deterministic, NOT calibrated pixels)
+
+These three behaviors ship in the layout engine but are explicitly NOT
+measured layout rules — no calibration batch backs a pixel value here. They
+are marked `unmeasured` in the engine and asserted structurally (ghosts,
+state) or as exact deterministic math (nine-slice) in the fixtures.
+
+- **Datamodel list placeholders.** A widget with `datamodel = "[...]"` carries
+  its per-row widget in an `item = { <widget> }` block (verified universal in
+  vanilla: window_character.gui skills `hbox` and modifiers `fixedgridbox` both
+  wrap the row widget in `item`). A static preview has no runtime rows, so the
+  engine stamps out 3 (`GHOST_COUNT`) copies of the resolved item template,
+  capped so they never overrun a container whose own explicit size is known.
+  Ghost copies are non-editable and drawn at `GHOST_OPACITY` 0.45. Assumption:
+  one data row == one instance of the item template laid out as a normal child.
+- **Nine-slice `spriteborder`.** `spriteborder = { x y }` (x = left & right,
+  y = top & bottom) plus `spriteborder_<side>` overrides put border widths on
+  the fill; the renderer draws the four corners unscaled, stretches the four
+  edges on one axis and the center on both. Border values are read straight
+  from the `.gui` attributes (reachable off `background` blocks and a widget's
+  own textured fill); the region geometry is deterministic. `texture_density`
+  scaling of the border is NOT applied (known gap). Sprite `.gfx` definitions
+  that declare a spriteborder outside the `.gui` are not parsed (known gap).
+- **`state = {}` blocks excluded.** State blocks describe animated transitions
+  (alpha/position deltas over a duration), not the resting layout. They are
+  treated as inert property blocks: base widget properties win and nothing
+  inside a `state` leaks into the rect. (Confirmed by fixture.)
+
 ## Practical notes for the calibration harness itself
 
 - Labels must sit >= 28px above measured rects: antialiased descenders
@@ -172,8 +200,11 @@ expands, so children end up packed from the box origin).
 - Sub-pixel rasterization rule (floor/round/ceil) for fractional box
   offsets — pin down once a case makes it observable at larger scale.
 - The 16px-tall elided line box oddity (B3-S1).
-- Nine-slice `spriteborder`, sprite frames, `mirror`, fixedgridbox cell
-  math, `ignoreinvisible`, overlappingitembox, scrollbar chrome metrics,
-  `alwaystransparent`/input behavior (irrelevant to static rendering).
-  (nine-slice needs a purpose-built calibration DDS texture, which the
-  repo's DDS encoder can generate.)
+- Nine-slice `spriteborder` geometry is now emitted deterministically (see
+  Phase 2 additions), but its interaction with `texture_density` and
+  `spriteType` tiling-vs-stretch is still UNmeasured — a purpose-built
+  calibration DDS texture (the repo's DDS encoder can generate one) would
+  pin down whether edges tile or stretch and how density scales the border.
+- Sprite frames, `mirror`, fixedgridbox cell math, `ignoreinvisible`,
+  overlappingitembox, scrollbar chrome metrics, `alwaystransparent`/input
+  behavior (irrelevant to static rendering).

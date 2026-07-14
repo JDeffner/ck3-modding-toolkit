@@ -405,7 +405,7 @@ function buildHtml(webview: vscode.Webview, fontDataUri: string | null): string 
   #zoomLabel { min-width: 46px; text-align: center; }
   .sep { width: 1px; align-self: stretch; background: var(--vscode-panel-border, rgba(128,128,128,0.35)); }
   #main { flex: 1 1 auto; position: relative; overflow: hidden; display: flex; }
-  #scroller { flex: 1 1 auto; overflow: auto; background: #101010; }
+  #scroller { flex: 1 1 auto; overflow: hidden; background: #101010; }
   #canvas { display: block; cursor: default; }
   #props {
     position: absolute; top: 8px; right: 8px; width: 210px;
@@ -473,6 +473,9 @@ function buildHtml(webview: vscode.Webview, fontDataUri: string | null): string 
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
 const WORLD_W = 1920, WORLD_H = 1080;
+// Datamodel list placeholders render at this opacity (matches GHOST_OPACITY
+// in the layout engine). Presentation only.
+const GHOST_OPACITY = 0.45;
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const scroller = document.getElementById("scroller");
@@ -489,6 +492,10 @@ let nodes = [];
 let images = {};
 let tintCache = {};
 let zoom = 0.5;
+// Free camera: canvas-local screen = world * zoom + pan (pan in CSS px).
+// Not clamped, so the layout can be moved anywhere, even out of view.
+let panX = 0, panY = 0;
+let firstRender = true;
 let hover = null;
 let selected = null;
 let selectedRef = null;
@@ -501,33 +508,56 @@ let downX = 0, downY = 0, downNode = null;
 // drill-down state: clicking the same spot cycles through overlapping widgets
 let lastClick = { x: -1e9, y: -1e9, index: -1 };
 // middle-mouse camera pan
-let panning = false, panStartX = 0, panStartY = 0, panScrollX = 0, panScrollY = 0;
+let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
+
+function clampZoom(z) { return Math.min(4, Math.max(0.1, z)); }
 
 function applyZoom(z) {
-  zoom = Math.min(4, Math.max(0.1, z));
+  zoom = clampZoom(z);
+  zoomLabel.textContent = Math.round(zoom * 100) + "%";
+  draw();
+}
+
+/**
+ * Client (viewport) coords -> world coords. Canvas maps world to screen as
+ * screenLocal = world * zoom + pan (screenLocal relative to the canvas
+ * top-left), so world = (client - canvasOrigin - pan) / zoom. Used by every
+ * hit-test, drag and hover path so they stay pixel-accurate at any pan/zoom.
+ */
+function toWorld(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: (clientX - rect.left - panX) / zoom, y: (clientY - rect.top - panY) / zoom };
+}
+
+/** Zoom to z keeping the world point at canvas-local (sx, sy) fixed on screen. */
+function zoomToScreenPoint(sx, sy, z) {
+  const z2 = clampZoom(z);
+  panX = sx - ((sx - panX) / zoom) * z2;
+  panY = sy - ((sy - panY) / zoom) * z2;
+  zoom = z2;
   zoomLabel.textContent = Math.round(zoom * 100) + "%";
   draw();
 }
 
 function setZoom(z, keepCenter) {
-  const cx = (scroller.scrollLeft + scroller.clientWidth / 2) / zoom;
-  const cy = (scroller.scrollTop + scroller.clientHeight / 2) / zoom;
-  applyZoom(z);
-  if (keepCenter) {
-    scroller.scrollLeft = cx * zoom - scroller.clientWidth / 2;
-    scroller.scrollTop = cy * zoom - scroller.clientHeight / 2;
-  }
+  if (keepCenter) zoomToScreenPoint(scroller.clientWidth / 2, scroller.clientHeight / 2, z);
+  else applyZoom(z);
 }
 
 /** Zoom keeping the world point under the cursor fixed. */
 function zoomAt(clientX, clientY, factor) {
   const rect = canvas.getBoundingClientRect();
-  const wx = (clientX - rect.left) / zoom;
-  const wy = (clientY - rect.top) / zoom;
-  applyZoom(zoom * factor);
-  const scRect = scroller.getBoundingClientRect();
-  scroller.scrollLeft = wx * zoom - (clientX - scRect.left);
-  scroller.scrollTop = wy * zoom - (clientY - scRect.top);
+  zoomToScreenPoint(clientX - rect.left, clientY - rect.top, zoom * factor);
+}
+
+/** Fit the whole world in the viewport and center it. */
+function fitAndCenter() {
+  const w = scroller.clientWidth, h = scroller.clientHeight;
+  zoom = clampZoom(Math.min(w / WORLD_W, h / WORLD_H));
+  zoomLabel.textContent = Math.round(zoom * 100) + "%";
+  panX = (w - WORLD_W * zoom) / 2;
+  panY = (h - WORLD_H * zoom) / 2;
+  draw();
 }
 
 function rgba(c, mulAlpha) {
@@ -558,6 +588,27 @@ function tinted(texPath, img, color) {
   return cv;
 }
 
+// Nine-slice regions: mirrors computeNineSlice in the layout engine (corners
+// 1:1, edges stretched one axis, center both). Deterministic geometry.
+function nineSlice(rect, border, texW, texH) {
+  const bl = Math.max(0, Math.min(border[0], texW, rect.w));
+  const bt = Math.max(0, Math.min(border[1], texH, rect.h));
+  const br = Math.max(0, Math.min(border[2], texW - bl, rect.w - bl));
+  const bb = Math.max(0, Math.min(border[3], texH - bt, rect.h - bt));
+  const sCols = [[0, bl], [bl, texW - bl - br], [texW - br, br]];
+  const sRows = [[0, bt], [bt, texH - bt - bb], [texH - bb, bb]];
+  const dCols = [[rect.x, bl], [rect.x + bl, rect.w - bl - br], [rect.x + rect.w - br, br]];
+  const dRows = [[rect.y, bt], [rect.y + bt, rect.h - bt - bb], [rect.y + rect.h - bb, bb]];
+  const out = [];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    const [sx, sw] = sCols[c], [sy, sh] = sRows[r];
+    const [dx, dw] = dCols[c], [dy, dh] = dRows[r];
+    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) continue;
+    out.push([sx, sy, sw, sh, dx, dy, dw, dh]);
+  }
+  return out;
+}
+
 function paintFill(rect, fill) {
   if (!fill || rect.w <= 0 || rect.h <= 0) return;
   const img = fill.texture ? images[fill.texture] : null;
@@ -567,7 +618,15 @@ function paintFill(rect, fill) {
     const src = isTintless(color) ? img : tinted(fill.texture, img, color);
     ctx.save();
     ctx.globalAlpha *= alpha;
-    ctx.drawImage(src, rect.x, rect.y, rect.w, rect.h);
+    const tw = src.naturalWidth || src.width || 0;
+    const th = src.naturalHeight || src.height || 0;
+    if (fill.border && tw > 0 && th > 0) {
+      for (const [sx, sy, sw, sh, dx, dy, dw, dh] of nineSlice(rect, fill.border, tw, th)) {
+        ctx.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh);
+      }
+    } else {
+      ctx.drawImage(src, rect.x, rect.y, rect.w, rect.h);
+    }
     ctx.restore();
   } else if (color) {
     ctx.save();
@@ -577,13 +636,17 @@ function paintFill(rect, fill) {
   }
 }
 
-function drawNode(node) {
+function drawNode(node, inheritedGhost) {
   const isDragged = dragging && node === dragNode;
   if (isDragged) {
     ctx.save();
     ctx.translate(dragDX, dragDY);
     ctx.globalAlpha *= 0.85;
   }
+  // Dim a datamodel placeholder subtree once, at its topmost ghost node.
+  const dimGhost = node.ghost && !inheritedGhost;
+  if (dimGhost) { ctx.save(); ctx.globalAlpha *= GHOST_OPACITY; }
+  const childGhost = inheritedGhost || node.ghost;
   const r = node.rect;
   paintFill(r, node.bg);
   paintFill(r, node.fill);
@@ -611,11 +674,12 @@ function drawNode(node) {
     ctx.beginPath();
     ctx.rect(r.x, r.y, r.w, r.h);
     ctx.clip();
-    for (const c of node.children) drawNode(c);
+    for (const c of node.children) drawNode(c, childGhost);
     ctx.restore();
   } else {
-    for (const c of node.children) drawNode(c);
+    for (const c of node.children) drawNode(c, childGhost);
   }
+  if (dimGhost) ctx.restore();
   if (isDragged) ctx.restore();
 }
 
@@ -657,10 +721,14 @@ function flatten() {
 }
 
 function draw() {
-  canvas.width = Math.round(WORLD_W * zoom);
-  canvas.height = Math.round(WORLD_H * zoom);
-  ctx.setTransform(zoom, 0, 0, zoom, 0, 0);
-  ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+  // Canvas fills the viewport; the camera transform positions the world in it.
+  const w = scroller.clientWidth, h = scroller.clientHeight;
+  canvas.width = w;
+  canvas.height = h;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#101010";
+  ctx.fillRect(0, 0, w, h);
+  ctx.setTransform(zoom, 0, 0, zoom, panX, panY);
   ctx.fillStyle = "#181818";
   ctx.fillRect(0, 0, WORLD_W, WORLD_H);
   for (const n of nodes) drawNode(n);
@@ -753,15 +821,17 @@ scroller.addEventListener("pointerdown", (ev) => {
     ev.preventDefault();
     panning = true;
     panStartX = ev.clientX; panStartY = ev.clientY;
-    panScrollX = scroller.scrollLeft; panScrollY = scroller.scrollTop;
+    panOrigX = panX; panOrigY = panY;
     scroller.setPointerCapture(ev.pointerId);
     canvas.style.cursor = "move";
   }
 });
 scroller.addEventListener("pointermove", (ev) => {
   if (!panning) return;
-  scroller.scrollLeft = panScrollX - (ev.clientX - panStartX);
-  scroller.scrollTop = panScrollY - (ev.clientY - panStartY);
+  // Grab-pan: content follows the cursor 1:1, with no bounds.
+  panX = panOrigX + (ev.clientX - panStartX);
+  panY = panOrigY + (ev.clientY - panStartY);
+  draw();
 });
 scroller.addEventListener("pointerup", (ev) => {
   if (ev.button === 1 && panning) {
@@ -775,9 +845,9 @@ scroller.addEventListener("auxclick", (ev) => { if (ev.button === 1) ev.preventD
 
 canvas.addEventListener("pointerdown", (ev) => {
   if (ev.button !== 0) return;
-  const rect = canvas.getBoundingClientRect();
-  downX = (ev.clientX - rect.left) / zoom;
-  downY = (ev.clientY - rect.top) / zoom;
+  const p = toWorld(ev.clientX, ev.clientY);
+  downX = p.x;
+  downY = p.y;
   const stack = hitStack(downX, downY);
   // Predictable dragging: if the SELECTED widget is under the cursor, the
   // drag applies to it, not to whatever is topmost.
@@ -787,9 +857,8 @@ canvas.addEventListener("pointerdown", (ev) => {
 
 canvas.addEventListener("pointermove", (ev) => {
   if (panning) return;
-  const rect = canvas.getBoundingClientRect();
-  const x = (ev.clientX - rect.left) / zoom;
-  const y = (ev.clientY - rect.top) / zoom;
+  const p = toWorld(ev.clientX, ev.clientY);
+  const x = p.x, y = p.y;
 
   if (downNode && ev.buttons === 1) {
     const dx = x - downX, dy = y - downY;
@@ -881,9 +950,8 @@ scroller.addEventListener("wheel", (ev) => {
 
 document.getElementById("zoomIn").addEventListener("click", () => setZoom(zoom * 1.25, true));
 document.getElementById("zoomOut").addEventListener("click", () => setZoom(zoom / 1.25, true));
-document.getElementById("zoomFit").addEventListener("click", () => {
-  setZoom(Math.min(scroller.clientWidth / WORLD_W, scroller.clientHeight / WORLD_H));
-});
+document.getElementById("zoomFit").addEventListener("click", fitAndCenter);
+window.addEventListener("resize", draw);
 document.getElementById("refresh").addEventListener("click", () => vscode.postMessage({ type: "refresh" }));
 undoBtn.addEventListener("click", () => vscode.postMessage({ type: "undo" }));
 redoBtn.addEventListener("click", () => vscode.postMessage({ type: "redo" }));
@@ -935,7 +1003,9 @@ window.addEventListener("message", (ev) => {
     img.src = uri;
   }
   statusEl.textContent = defaultStatus();
-  draw();
+  // First render: fit and center the layout instead of pinning it top-left.
+  if (firstRender) { firstRender = false; fitAndCenter(); }
+  else draw();
 });
 </script>
 </body>

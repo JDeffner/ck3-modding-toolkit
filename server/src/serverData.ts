@@ -5,8 +5,11 @@
  * replaced by a minimal callback registry (no vscode imports server-side).
  */
 import type { TokenData } from "../../shared/src/types";
+import { compileModifierTemplates, type ModifierTemplate } from "./data/modifierTemplates";
 import { emptyDataTypes, type DataTypesData } from "./data/dataTypes";
 import { emptyUsage, type DataFnUsage } from "./data/dataFnUsage";
+import { DefinesIndex } from "./data/defines";
+import { TextFormattingIndex } from "./data/textFormatting";
 import { DefinitionIndex } from "./index/indexer";
 import { ReferenceIndex } from "./index/references";
 import { ScopeModel } from "./scopes/model";
@@ -15,10 +18,16 @@ export class ServerData {
   tokens: TokenData[] = [];
   /** name -> all tokens with that name (a name can be both trigger and effect). */
   tokenMap = new Map<string, TokenData[]>();
+  /** Templated modifier tags ($CULTURE$_opinion), compiled for lazy expansion. */
+  modifierTemplates: ModifierTemplate[] = [];
   /** [ ... ] datafunction tables (bundled wiki baseline / user's DumpDataTypes output). */
   dataTypes: DataTypesData = emptyDataTypes();
   /** Vanilla [ ... ] usage harvest: counts, literals, examples (dataFnUsage.ts). */
   dataFnUsage: DataFnUsage = emptyUsage();
+  /** `define:NS|CONST` constants harvested from engine/game/mod defines. */
+  defines = new DefinesIndex();
+  /** `#tag` loc text-formatting definitions harvested from gui textformatting blocks. */
+  textFormatting = new TextFormattingIndex();
   index = new DefinitionIndex();
   /** Usage sites, mod files only (vanilla references are computed on demand). */
   refIndex = new ReferenceIndex();
@@ -33,6 +42,13 @@ export class ServerData {
   /** Schema root scopes for an absolute file path (set by the host; used for
    *  static variable-type resolution — see scopes/varTypes.ts). */
   rootScopesForFile: (file: string) => Set<string> | null = () => null;
+  /** Origin label for a definition: the owning mod's descriptor name instead of
+   *  the generic "mod"/"parent" (set by the host from the configured roots —
+   *  see index/modOrigin.ts). Default: the raw source tag. */
+  originLabel: (def: { file: string; source: string }) => string = (def) => def.source;
+  /** The mod root a file lives under (set by the host; used to scope the
+   *  overview views to one workspace mod). Default: unknown. */
+  modRootOf: (file: string) => string | null = () => null;
 
   private listeners: Array<() => void> = [];
 
@@ -50,6 +66,11 @@ export class ServerData {
     }
     this.scopeModel = new ScopeModel(tokens);
     this.applyScriptedLists();
+    this.fire();
+  }
+
+  setModifierTemplates(raw: TokenData[]): void {
+    this.modifierTemplates = compileModifierTemplates(raw);
     this.fire();
   }
 

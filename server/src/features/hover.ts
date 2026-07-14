@@ -25,6 +25,7 @@ import { nodeAtOffset, walkStatements } from "../parser";
 import type { RefField } from "../../../shared/src/schema/types";
 import { BLOCK_REF_FIELDS, VAR_PREFIX_KINDS } from "../../../shared/src/schema/ck3Schema";
 import { KEYWORD_DOCS, scopeWordDoc } from "../data/keywordDocs";
+import { matchTemplatedModifier, templatedModifierDoc } from "../data/modifierTemplates";
 import type { Scope } from "../scopes/model";
 import {
   renderCard,
@@ -36,6 +37,7 @@ import {
   type CardInput,
 } from "./hoverRender";
 import type { Definition } from "../../../shared/src/types";
+import type { DefineEntry } from "../data/defines";
 
 export function provideHover(
   data: ServerData,
@@ -46,6 +48,22 @@ export function provideHover(
   getSchema?: () => SchemaData
 ): Hover | null {
   const lineText = getLineText(document, position.line);
+
+  // `define:NS|CONST` — reassemble the full token (wordPattern splits on `:`/`|`).
+  const defineHit = defineRefAt(lineText, position.character);
+  if (defineHit) {
+    const card = definesCard(data, defineHit.namespace, defineHit.name);
+    if (card) {
+      return {
+        contents: { kind: MarkupKind.Markdown, value: renderHover([card], null) },
+        range: {
+          start: { line: position.line, character: defineHit.start },
+          end: { line: position.line, character: defineHit.end },
+        },
+      };
+    }
+  }
+
   let range = wordRangeAt(lineText, position.character);
   if (!range) return null;
   // Dot chains (`root.location.county`) resolve per segment under the cursor;
@@ -109,15 +127,18 @@ export function provideHover(
   const expected = getSchema ? refKindsAt(document, position, getSchema().refFields) : null;
   const defs = data.index.lookup(word);
   const expectedDefs = expected ? defs.filter((d) => expected.includes(d.kind)) : [];
+  // Anchor for the "N references" command link: the hovered site itself, so
+  // the client can drive the references view from it.
+  const at = { uri: document.uri, line: position.line, character: range.start };
 
   if (expectedDefs.length > 0) {
-    for (const def of expectedDefs) cards.push(definitionCard(data, def));
+    for (const def of expectedDefs) cards.push(definitionCard(data, def, at));
   } else {
     for (const token of data.tokenMap.get(word) ?? []) {
       cards.push(tokenCard(token, current));
     }
     for (const def of defs) {
-      cards.push(definitionCard(data, def));
+      cards.push(definitionCard(data, def, at));
     }
   }
 
@@ -131,6 +152,7 @@ export function provideHover(
       (entry?.kind && getSchema ? enumValueCard(document, position, word, entry, getSchema) : null) ??
       macroParamCard(data, document, position, word) ??
       relationTriggerCard(data, word) ??
+      templatedModifierCard(data, word) ??
       namespaceCard(data, word) ??
       scopeWordCard(word) ??
       keywordCard(word) ??
@@ -159,24 +181,111 @@ export function provideHover(
   };
 }
 
-/** An engine-token card: badge, name, scope pills, doc, traits (§D2 mock 1). */
+/**
+ * An engine-token card (§D2 mock 1). Teaches USAGE, not usage counts: what the
+ * token does, the datatype its VALUE expects, a syntax example, and the scopes
+ * it runs in / the scope it returns. No vanilla-frequency line — engine tokens
+ * never carry one and the user does not want it.
+ */
 function tokenCard(token: TokenData, current: ReadonlySet<string> | null): string {
   const card: CardInput = { kind: token.kind, name: token.name };
-  card.doc = token.doc || undefined;
-  if (token.traits) card.traits = token.traits.split("\n").join(" · ");
-  const footer: string[] = [];
-  if (token.scopes.length > 0) {
-    footer.push(`Supported scopes: ${token.scopes.map((s) => scopePill(s, current)).join(" ")}`);
+  const { input, output, plain } = partitionScopes(token.scopes);
+
+  // Event targets return a scope: surface it as the `→ type` head tail — it is
+  // this token's real "datatype".
+  if (output.length > 0) card.headTail = `→ ${output.map(scopeType).join(" | ")}`;
+
+  // Description, then the expected value datatype (the user's core ask).
+  const docParts: string[] = [];
+  if (token.doc) docParts.push(token.doc);
+  const shape = valueShape(token);
+  if (shape) docParts.push(`Value: ${shape}`);
+  if (docParts.length > 0) card.doc = docParts.join("\n\n");
+
+  // Syntax example, fenced (from a script_docs `usage:` block or the wiki).
+  if (token.usage) card.example = token.usage;
+
+  // Remaining metadata (targets, categories, requires-data, wiki note); the
+  // `Traits:` line is already folded into the value datatype above.
+  const meta = otherTraitBits(token.traits);
+  if (meta.length > 0) card.traits = meta.join(" · ");
+
+  // Input scope(s) you call it from — matched against the current cursor scope.
+  const scopeVals = plain.length > 0 ? plain : input;
+  if (scopeVals.length > 0) {
+    card.footer = [`Supported scopes: ${scopeVals.map((s) => scopePill(s, current)).join(" ")}`];
   }
-  if (footer.length > 0) card.footer = footer;
   return renderCard(card);
 }
 
+/** Split raw scope strings into the input / output / plain buckets. */
+function partitionScopes(scopes: string[]): { input: string[]; output: string[]; plain: string[] } {
+  const input: string[] = [];
+  const output: string[] = [];
+  const plain: string[] = [];
+  for (const s of scopes) {
+    if (s.startsWith("input: ")) input.push(s.slice("input: ".length));
+    else if (s.startsWith("output: ")) output.push(s.slice("output: ".length));
+    else plain.push(s);
+  }
+  return { input, output, plain };
+}
+
+/**
+ * Plain-language datatype for a token's VALUE, deduced from its `Traits:` line
+ * and kind: boolean, comparison, scope target, database key, block. null when
+ * the docs give no basis to say (e.g. a plain event target — the `→ type` head
+ * already carries that).
+ */
+function valueShape(token: TokenData): string | null {
+  const tMatch = /Traits:\s*([^\n]*)/i.exec(token.traits ?? "");
+  const t = (tMatch ? tMatch[1] : "").trim();
+  if (token.kind === "trigger") {
+    if (/\byes\/no\b/i.test(t)) return "`yes`/`no` (boolean)";
+    if (/valid date/i.test(t)) return "a date, or a comparison operator + date";
+    if (/[<>]=?|!=/.test(t)) return "a number or script value (comparison: `<` `<=` `=` `!=` `>` `>=`)";
+    const scopeM = /\b([A-Za-z_][A-Za-z0-9_]*)\s+(scope|target)\b/i.exec(t);
+    if (scopeM) return `a ${scopeM[1]} ${scopeM[2].toLowerCase()}`;
+    if (/\bkey\b/i.test(t)) return "a database key";
+    if (t) return `one of: ${t}`;
+    return null;
+  }
+  if (token.kind === "effect") {
+    if (token.usage && token.usage.includes("{")) return "a block — see the example below";
+    return null;
+  }
+  if (token.kind === "modifier") return "a number (the modifier's magnitude)";
+  return null;
+}
+
+/** Metadata trait lines minus the `Traits:`/legacy `Example:` lines, flattened. */
+function otherTraitBits(traits: string | undefined): string[] {
+  if (!traits) return [];
+  return traits
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !/^Traits:/i.test(l) && !/^Example:/i.test(l));
+}
+
 /** An indexed-definition card: badge, name, `· source`, provenance link (§D2 mock 2). */
-function definitionCard(data: ServerData, def: ReturnType<ServerData["index"]["lookup"]>[number]): string {
+function definitionCard(
+  data: ServerData,
+  def: ReturnType<ServerData["index"]["lookup"]>[number],
+  at?: { uri: string; line: number; character: number }
+): string {
   const card: CardInput = { kind: def.kind, badgeLabel: def.kind.replace(/_/g, " "), name: def.name };
-  card.headTail = `· ${def.source}`;
+  // Origin: the owning mod's descriptor name where known ("· My Mod"), the raw
+  // source tag ("· vanilla") otherwise.
+  const origin = data.originLabel(def);
+  card.headTail = `· ${origin}`;
   if (def.kind === "loc_key" && def.value !== undefined) card.doc = `"${def.value}"`;
+  // Ad-hoc lists carry a statically resolved item type (varTypes.ts).
+  if (def.kind === "list") {
+    const item = variableTypes(data, data.rootScopesForFile).adhocListItemTypes.get(def.name);
+    if (item && item.size > 0) {
+      card.headTail = `of ${[...item].map(scopeType).join(" | ")} · ${origin}`;
+    }
+  }
 
   // Doc-comment prose + structured tags (§E3). Prose first, then tags; `@example`
   // fills the fenced slot; `@deprecated` strikes the name. Empty when absent.
@@ -186,8 +295,20 @@ function definitionCard(data: ServerData, def: ReturnType<ServerData["index"]["l
   if (body.deprecated) card.name = `~~${def.name}~~`;
 
   const footer: string[] = [provenance(def)];
-  const refs = data.refIndex.usageCount(def.name);
-  if (refs > 0) footer.push(`${refs.toLocaleString("en-US")} reference${refs === 1 ? "" : "s"}`);
+  // Full count including key-position call sites (usageCount excludes those).
+  // A command link opens the references view; the client's hover middleware
+  // trusts exactly this command (extension.ts). Plain text without an anchor.
+  const refs = data.refIndex.lookup(def.name).length;
+  if (refs > 0) {
+    const label = `${refs.toLocaleString("en-US")} reference${refs === 1 ? "" : "s"}`;
+    footer.push(
+      at
+        ? `[${label}](command:ck3.showReferences?${encodeURIComponent(
+            JSON.stringify([at.uri, at.line, at.character])
+          )} "Show all references")`
+        : label
+    );
+  }
   card.footer = footer;
   return renderCard(card);
 }
@@ -219,9 +340,13 @@ function savedScopeCard(
   entry: Ck3SchemaEntry | null
 ): string {
   const ambient = entry?.ambientScopes?.find((a) => a.name === name);
-  const saved = getSavedScopes(document, data.scopeModel, rootScopes, entry?.ambientScopes, inferenceContextFor(data, entry));
+  const ictx = inferenceContextFor(data, entry);
+  const saved = getSavedScopes(document, data.scopeModel, rootScopes, entry?.ambientScopes, ictx);
   const inferred = saved.get(name);
-  const type = ambient?.type ?? (inferred && inferred.size > 0 ? [...inferred].join(" | ") : "unknown");
+  // Cross-file fallback: types merged over every indexed save site of the mod.
+  const global = inferred === undefined || inferred === null ? ictx.savedScopeTypes?.get(name) : undefined;
+  const typed = inferred && inferred.size > 0 ? inferred : global && global.size > 0 ? global : null;
+  const type = ambient?.type ?? (typed ? [...typed].join(" | ") : "unknown");
 
   const card: CardInput = {
     kind: "saved_scope",
@@ -235,20 +360,37 @@ function savedScopeCard(
   const site = firstSaveSite(document, name);
   if (site !== null) doc.push(`Saved in this file: ${path.basename(URIToPath(document.uri))}:${site + 1}`);
   else if (ambient) doc.push(`Engine-provided (not saved in this file).`);
-  else if (!inferred) doc.push(`Saved elsewhere in the mod.`);
+  else if (!inferred) {
+    // Not saved here: link the mod's save sites (like the variable card does).
+    const sites = data.index
+      .lookup(name)
+      .filter((d) => d.kind === "saved_scope")
+      .slice(0, 3);
+    if (sites.length > 0) {
+      doc.push(
+        sites
+          .map((d) => `saved in [${path.basename(d.file)}:${d.line + 1}](${URI.file(d.file)}#L${d.line + 1})`)
+          .join("  \n")
+      );
+    } else {
+      doc.push(`Saved elsewhere in the mod.`);
+    }
+  }
 
   if (doc.length > 0) card.doc = doc.join("  \n");
   return renderCard(card);
 }
 
-/** Line (0-based) of the first `save_scope_as`/`save_temporary_scope_as = name` in the file. */
+/** Line (0-based) of the first `save_scope_as`/`save_temporary_scope_as`/
+ * `save_temporary_value_as = name` in the file. */
+const SAVE_SITE_KEYS = new Set(["save_scope_as", "save_temporary_scope_as", "save_temporary_value_as"]);
 function firstSaveSite(document: TextDocument, name: string): number | null {
   const { result, lineIndex } = getParse(document);
   let line: number | null = null;
   walkStatements(result.root, (stmt) => {
     if (line !== null) return;
     if (stmt.kind !== "assignment" || stmt.key.quoted) return;
-    if (stmt.key.text !== "save_scope_as" && stmt.key.text !== "save_temporary_scope_as") return;
+    if (!SAVE_SITE_KEYS.has(stmt.key.text)) return;
     if (stmt.value?.kind === "scalar" && !stmt.value.quoted && stmt.value.text === name) {
       line = lineIndex.positionAt(stmt.value.range.start).line;
     }
@@ -359,6 +501,25 @@ function relationTriggerCard(data: ServerData, word: string): string | null {
 }
 
 /**
+ * `french_opinion` — modifiers the engine generates per definition, matched
+ * lazily against the templated modifiers.log tags ($CULTURE$_opinion) and the
+ * definition index (never materialized: AGOT-scale mods define thousands of
+ * cultures).
+ */
+function templatedModifierCard(data: ServerData, word: string): string | null {
+  const m = matchTemplatedModifier(word, data.modifierTemplates, (n) => data.index.lookup(n));
+  if (!m) return null;
+  const card: CardInput = {
+    kind: "modifier",
+    name: word,
+    headTail: `· generated from \`${m.template.name}\``,
+    doc: templatedModifierDoc(m),
+  };
+  if (m.template.traits) card.traits = m.template.traits.split("\n").join(" · ");
+  return renderCard(card);
+}
+
+/**
  * `start_scheme = { target_character = … }` — the key is a block argument of an
  * engine effect/trigger call; surface the call's own doc, which describes its
  * arguments. Last-resort fallback: anything more specific wins.
@@ -398,6 +559,45 @@ function namespaceCard(data: ServerData, word: string): string | null {
     name: word,
     doc: `Events in this namespace are named \`${word}.<n>\`.`,
   });
+}
+
+/** The `define:NS|CONST` reference spanning the cursor, or null. */
+function defineRefAt(
+  lineText: string,
+  character: number
+): { namespace: string; name: string; start: number; end: number } | null {
+  const re = /define:([A-Za-z0-9_]+)\|([A-Za-z0-9_]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(lineText)) !== null) {
+    const start = m.index;
+    const end = m.index + m[0].length;
+    if (character >= start && character <= end) return { namespace: m[1], name: m[2], start, end };
+  }
+  return null;
+}
+
+/** A define card: name, resolved value, source file + layer, "overrides <layer>". */
+function definesCard(data: ServerData, namespace: string, name: string): string | null {
+  const res = data.defines.resolve(namespace, name);
+  if (!res) return null;
+  const footer = [defineSourceLink(res.winner)];
+  if (res.shadowed.length > 0) footer.push(`overrides ${res.shadowed.map((s) => s.layer).join(", ")}`);
+  return renderCard({
+    kind: "define",
+    badgeLabel: "define",
+    name: `${namespace}|${name}`,
+    headTail: `= ${res.winner.value}`,
+    footer,
+  });
+}
+
+/** `<layer> · [common/defines/…:line](uri)` provenance for a define entry. */
+function defineSourceLink(e: DefineEntry): string {
+  const norm = e.file.replace(/\\/g, "/");
+  const i = norm.toLowerCase().lastIndexOf("/common/defines/");
+  const rel = i >= 0 ? `${norm.slice(i + 1)}:${e.line + 1}` : `${path.basename(e.file)}:${e.line + 1}`;
+  const target = URI.file(e.file).with({ fragment: String(e.line + 1) }).toString();
+  return `${e.layer} · [${rel}](${target})`;
 }
 
 /** root/ROOT/this/prev(prev…)/from(from…) — scope navigation keywords. */

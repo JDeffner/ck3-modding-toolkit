@@ -19,6 +19,9 @@ export interface TokenData {
   scopes: string[];
   /** Extra metadata lines (targets, traits, categories...), display-only. */
   traits?: string;
+  /** A syntax/usage example block (`add_hook = { type = X ... }`), preserved
+   *  verbatim from a `usage:` section, an inline `name = …` line, or the wiki. */
+  usage?: string;
 }
 
 /**
@@ -71,4 +74,11 @@ export interface Reference {
   /** Character range of the name on the line (prefix like `scope:` excluded). */
   startChar: number;
   endChar: number;
+  /** Key-position call site (`my_effect = yes`): shown by find-references and
+   * rename, excluded from the usage-count completion ranking signal (§C2). */
+  call?: boolean;
+  /** Call sites only: enclosing key chain below the top-level definition
+   * (dotted, outermost first) — input for call-site scope aggregation, which
+   * types un-@scope'd scripted effects/triggers from where they are called. */
+  chain?: string;
 }

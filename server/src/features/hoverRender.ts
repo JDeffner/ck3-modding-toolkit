@@ -38,7 +38,10 @@ function badgeColor(kind: string): ChartColor {
       return "red";
     case "structure_key":
     case "keyword":
+    case "text_format":
       return "yellow";
+    case "define":
+      return "blue";
     case "saved_scope":
     case "scope_word":
     case "macro_param":
@@ -77,6 +80,16 @@ export function scopePill(scope: string, current: ReadonlySet<string> | null): s
 /** Blue scope-type span for the "→ character" tail on badges/pills. */
 export function scopeType(type: string): string {
   return span("blue", type);
+}
+
+/**
+ * A ■ swatch in an actual game color (not a theme var): the only place an
+ * inline `color:rgb(...)` is emitted, since these are literal loc colors the
+ * theme must not recolor. Content is a ■ so stripping the span leaves a marker.
+ */
+export function colorSwatch(rgb: [number, number, number]): string {
+  const to255 = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+  return `<span style="color:rgb(${to255(rgb[0])}, ${to255(rgb[1])}, ${to255(rgb[2])});">■</span>`;
 }
 
 // ---------------------------------------------------------------------------

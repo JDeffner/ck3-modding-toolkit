@@ -14,10 +14,10 @@
  *
  * No `vscode` imports: unit-tested in plain Node.
  */
-import type { Definition } from "../../../shared/src/types";
+import type { Definition, Reference } from "../../../shared/src/types";
 import type { Ck3SchemaEntry } from "../../../shared/src/schema/types";
 import type { ServerData } from "../serverData";
-import type { InferenceContext } from "./inference";
+import { resolveKeyChainScopes, type InferenceContext } from "./inference";
 import type { Scope, ScopeModel } from "./model";
 
 const VAR_KIND_PREFIX: Record<string, string> = {
@@ -40,6 +40,15 @@ export interface VariableTypeInfo {
   types: Map<string, Set<Scope> | null>;
   /** `var:x`-keyed ITEM types of variable lists (for in-list iterator hovers). */
   listItemTypes: Map<string, Set<Scope> | null>;
+  /** Plain-named ITEM types of ad-hoc lists (add_to_list/add_to_temporary_list
+   * sites): the set-site's enclosing key chain resolved statically. */
+  adhocListItemTypes: Map<string, Set<Scope> | null>;
+  /** Saved-scope types merged across ALL indexed save sites of the workspace
+   * mods — the cross-file fallback when a scope: name is not saved in the
+   * current file. Sites carry a discriminated hint in Definition.value
+   * (index/references.ts): "chain:" key chains, "expr:" value expressions,
+   * "type:value" script-value saves. */
+  savedScopeTypes: Map<string, Set<Scope> | null>;
 }
 
 interface Cache {
@@ -82,8 +91,60 @@ export function inferenceContextFor(data: ServerData, entry: Ck3SchemaEntry | nu
     onActionScopes: data.onActionScopes,
     varTypes: varInfo.types,
     varListItemTypes: varInfo.listItemTypes,
+    adhocListItemTypes: varInfo.adhocListItemTypes,
+    savedScopeTypes: varInfo.savedScopeTypes,
+    callSiteScopes: callSiteScopes(data, data.rootScopesForFile),
     defScopeTag: (name) => defScopeTag(data, name),
   };
+}
+
+interface CallSiteCache {
+  revision: string;
+  map: Map<string, Set<Scope>>;
+}
+
+const callSiteCache = new WeakMap<ServerData, CallSiteCache>();
+
+/**
+ * Calling scopes of scripted effects/triggers/modifiers aggregated from their
+ * indexed call sites (rebuilt when either index changes). The root-scope
+ * fallback for definitions without a CK3Doc `@scope` tag.
+ */
+export function callSiteScopes(
+  data: ServerData,
+  rootScopesForFile: (file: string) => Set<Scope> | null
+): Map<string, Set<Scope>> {
+  const revision = `${data.index.revision}:${data.refIndex.revision}`;
+  const cached = callSiteCache.get(data);
+  if (cached && cached.revision === revision) return cached.map;
+  const map = buildCallSiteScopes(data.refIndex.all(), data.scopeModel, rootScopesForFile);
+  callSiteCache.set(data, { revision, map });
+  return map;
+}
+
+/**
+ * Union of the statically resolved scopes at every call site of a name.
+ * Unresolved sites (unknown-root files, dynamic anchors) contribute NOTHING —
+ * unlike the variable/list maps this does not poison, because an unresolved
+ * call site carries no information about the calling scope. One level only:
+ * calls inside other untyped scripted effects stay unresolved (no transitive
+ * closure). Ranking/annotation input only, never a diagnostic (AD-5).
+ */
+export function buildCallSiteScopes(
+  refs: Iterable<Reference>,
+  model: ScopeModel,
+  rootScopesForFile: (file: string) => Set<Scope> | null
+): Map<string, Set<Scope>> {
+  const map = new Map<string, Set<Scope>>();
+  for (const ref of refs) {
+    if (!ref.call || ref.chain === undefined) continue;
+    const resolved = resolveKeyChainScopes(ref.chain.split("."), model, rootScopesForFile(ref.file));
+    if (!resolved || resolved.size === 0) continue;
+    const prev = map.get(ref.name);
+    if (prev) for (const s of resolved) prev.add(s);
+    else map.set(ref.name, new Set(resolved));
+  }
+  return map;
 }
 
 /** The variable type map for the current index revision (cached). */
@@ -94,7 +155,9 @@ export function variableTypes(
   const cached = cache.get(data);
   if (cached && cached.revision === data.index.revision) return cached.info;
   const info = buildVariableTypes(
-    data.index.entries((d) => d.kind in VAR_KIND_PREFIX || d.kind in LIST_KIND_PREFIX),
+    data.index.entries(
+      (d) => d.kind in VAR_KIND_PREFIX || d.kind in LIST_KIND_PREFIX || d.kind === "list" || d.kind === "saved_scope"
+    ),
     data.scopeModel,
     rootScopesForFile
   );
@@ -109,6 +172,8 @@ export function buildVariableTypes(
 ): VariableTypeInfo {
   const types = new Map<string, Set<Scope> | null>();
   const listItemTypes = new Map<string, Set<Scope> | null>();
+  const adhocListItemTypes = new Map<string, Set<Scope> | null>();
+  const savedScopeTypes = new Map<string, Set<Scope> | null>();
   const merge = (map: Map<string, Set<Scope> | null>, key: string, resolved: Set<Scope> | null) => {
     const prev = map.get(key);
     if (prev === undefined) {
@@ -120,6 +185,19 @@ export function buildVariableTypes(
     }
   };
   for (const def of defs) {
+    // Ad-hoc lists: def.value is the set-site's enclosing key chain (dotted,
+    // outermost first — see index/references.ts), resolved from the file root.
+    if (def.kind === "list") {
+      if (def.value === undefined) continue;
+      const resolved = resolveKeyChainScopes(def.value.split("."), model, rootScopesForFile(def.file));
+      merge(adhocListItemTypes, def.name, resolved);
+      continue;
+    }
+    // Saved scopes: typed per save form via the discriminated value hint.
+    if (def.kind === "saved_scope") {
+      merge(savedScopeTypes, def.name, resolveSavedScopeHint(def, model, rootScopesForFile));
+      continue;
+    }
     const varPrefix = VAR_KIND_PREFIX[def.kind];
     const listPrefix = LIST_KIND_PREFIX[def.kind];
     if (!varPrefix && !listPrefix) continue;
@@ -130,7 +208,27 @@ export function buildVariableTypes(
     if (varPrefix) merge(types, `${varPrefix}:${def.name}`, resolved);
     else merge(listItemTypes, `${listPrefix}:${def.name}`, resolved);
   }
-  return { types, listItemTypes };
+  return { types, listItemTypes, adhocListItemTypes, savedScopeTypes };
+}
+
+/** Resolve one save site's discriminated type hint; null = unknown. Sites
+ * without a hint (older index rows) contribute unknown, poisoning the merge —
+ * annotate, never guess (AD-5). */
+function resolveSavedScopeHint(
+  def: Definition,
+  model: ScopeModel,
+  rootScopesForFile: (file: string) => Set<Scope> | null
+): Set<Scope> | null {
+  const hint = def.value;
+  if (hint === undefined) return null;
+  if (hint === "type:value") return new Set(["value"]);
+  if (hint.startsWith("expr:")) {
+    return resolveValueExpr(hint.slice(5), def.file, model, rootScopesForFile);
+  }
+  if (hint.startsWith("chain:")) {
+    return resolveKeyChainScopes(hint.slice(6).split("."), model, rootScopesForFile(def.file));
+  }
+  return null;
 }
 
 /**

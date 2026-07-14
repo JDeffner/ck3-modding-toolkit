@@ -41,6 +41,8 @@ export const KEYWORD_DOCS: Record<string, string> = {
   floor: "Round down to an integer (yes/no).",
   fixed_range: "A uniformly random value between `min` and `max` (re-rolls each evaluation).",
   integer_range: "A uniformly random integer between `min` and `max`.",
+  save_temporary_value_as:
+    "Saves the current value of this script-value calculation under a name; read it back later in the same calculation as `scope:<name>`.",
   factor: "Multiplies the surrounding weight/value when the enclosing modifier's trigger holds.",
   weight: "Weight of this entry when the game picks one of several candidates.",
   // Durations & chances

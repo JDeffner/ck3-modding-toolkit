@@ -6,8 +6,9 @@ For static validation with ck3-tiger, see `validation.md`.)
 ## Debugging workflow (do this every time)
 
 Division of labor: the **user** launches the game and runs console commands; **you** read and
-analyze the resulting logs directly from `<logs>` (see SKILL.md Step 0; check LastWriteTime —
-stale dumps mislead). Full table in SKILL.md "Game logs".
+analyze the resulting logs directly from `<logs>` (see SKILL.md Step 0). Full table in SKILL.md
+"Game logs". **Check LastWriteTime first** — a dump older than the last patch or play session
+lists stale names and misleads: `(Get-Item '<logs>\effects.log').LastWriteTime`.
 
 1. Ask the user to launch with `-debug_mode` (+ `-develop` for hot reload). Hot-reload limits:
    good for small incremental script/GUI edits; large structural changes need a restart; new loc

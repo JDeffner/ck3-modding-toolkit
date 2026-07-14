@@ -97,8 +97,9 @@ function wrapHtml(body: string): string {
 <style>
   :root { color-scheme: light dark; }
   html, body { margin: 0; height: 100%; font-family: var(--vscode-font-family, sans-serif); color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); }
+  body { display: flex; flex-direction: column; }
   #bar {
-    position: sticky; top: 0; display: flex; gap: 10px; align-items: center;
+    flex: 0 0 auto; display: flex; gap: 10px; align-items: center;
     padding: 5px 10px; font-size: 0.9em;
     background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
     border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
@@ -109,11 +110,11 @@ function wrapHtml(body: string): string {
     background: var(--vscode-button-secondaryBackground, transparent);
     border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.4));
   }
-  #stage {
-    display: flex; align-items: center; justify-content: center;
-    min-height: calc(100% - 32px); overflow: auto; padding: 16px;
-  }
+  /* Panning moves the image outside the stage, so clip rather than scroll. */
+  #stage { flex: 1 1 auto; position: relative; overflow: hidden; }
+  #stage.panning { cursor: grabbing; }
   #img {
+    position: absolute; top: 0; left: 0; transform-origin: 0 0;
     image-rendering: auto;
     /* checkerboard so alpha is visible */
     background: repeating-conic-gradient(rgba(128,128,128,0.25) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px;
@@ -135,23 +136,65 @@ function imageHtml(dataUri: string, caption: string): string {
 </div>
 <div id="stage"><img id="img" class="pixelated" src="${dataUri}" /></div>
 <script>
+  const stage = document.getElementById("stage");
   const img = document.getElementById("img");
-  let scale = 1;
-  function apply() { img.style.width = (img.naturalWidth * scale) + "px"; }
-  img.addEventListener("load", () => {
-    const stage = document.getElementById("stage");
-    const fit = Math.min(1, (stage.clientWidth - 40) / img.naturalWidth, (stage.clientHeight - 40) / img.naturalHeight);
-    scale = fit > 0 ? Math.min(1, fit) : 1;
+  // Zoom clamps: 5% to 3200%.
+  const MIN = 0.05, MAX = 32;
+  let scale = 1, tx = 0, ty = 0;
+
+  function apply() { img.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")"; }
+  function fitScale() {
+    return Math.min(1, stage.clientWidth / img.naturalWidth, stage.clientHeight / img.naturalHeight);
+  }
+  function center(s) {
+    scale = Math.max(MIN, Math.min(MAX, s));
+    tx = (stage.clientWidth - img.naturalWidth * scale) / 2;
+    ty = (stage.clientHeight - img.naturalHeight * scale) / 2;
+    apply();
+  }
+  // Zoom about a stage-relative point, keeping the image pixel under it fixed.
+  function zoomAt(cx, cy, factor) {
+    const next = Math.max(MIN, Math.min(MAX, scale * factor));
+    const ix = (cx - tx) / scale, iy = (cy - ty) / scale;
+    scale = next;
+    tx = cx - ix * scale;
+    ty = cy - iy * scale;
+    apply();
+  }
+
+  img.addEventListener("load", () => center(fitScale() > 0 ? fitScale() : 1));
+
+  stage.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const r = stage.getBoundingClientRect();
+    zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+  }, { passive: false });
+
+  // Middle-button drag pans freely; preventDefault suppresses autoscroll.
+  let panX = 0, panY = 0, panning = false;
+  stage.addEventListener("mousedown", (e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    panning = true; panX = e.clientX; panY = e.clientY;
+    stage.classList.add("panning");
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!panning) return;
+    tx += e.clientX - panX; ty += e.clientY - panY;
+    panX = e.clientX; panY = e.clientY;
     apply();
   });
-  document.getElementById("zin").addEventListener("click", () => { scale *= 1.25; apply(); });
-  document.getElementById("zout").addEventListener("click", () => { scale /= 1.25; apply(); });
-  document.getElementById("z100").addEventListener("click", () => { scale = 1; apply(); });
-  document.getElementById("zfit").addEventListener("click", () => {
-    const stage = document.getElementById("stage");
-    scale = Math.min(1, (stage.clientWidth - 40) / img.naturalWidth, (stage.clientHeight - 40) / img.naturalHeight);
-    apply();
+  window.addEventListener("mouseup", (e) => {
+    if (e.button !== 1 || !panning) return;
+    panning = false; stage.classList.remove("panning");
   });
+  stage.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
+
+  const cx = () => stage.clientWidth / 2, cy = () => stage.clientHeight / 2;
+  document.getElementById("zin").addEventListener("click", () => zoomAt(cx(), cy(), 1.25));
+  document.getElementById("zout").addEventListener("click", () => zoomAt(cx(), cy(), 1 / 1.25));
+  document.getElementById("z100").addEventListener("click", () => center(1));
+  document.getElementById("zfit").addEventListener("click", () => center(fitScale()));
   document.getElementById("pix").addEventListener("change", (e) => img.classList.toggle("pixelated", e.target.checked));
 </script>`;
 }

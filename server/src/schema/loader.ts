@@ -67,33 +67,36 @@ function buildStructureIndex(entries: Ck3SchemaEntry[]): StructureIndex {
   };
 }
 
-export function loadSchema(modPath: string | null, log?: (msg: string) => void): SchemaData {
+export function loadSchema(modPath: string | string[] | null, log?: (msg: string) => void): SchemaData {
   const entries = [...CK3_SCHEMA];
   const refFields = new Map<string, RefField>();
   for (const f of REF_FIELDS) refFields.set(f.key, f);
   const prefixRefs: Record<string, string[]> = { ...PREFIX_REFS };
 
-  if (modPath) {
-    const overlayFile = path.join(modPath, ".ck3modding", "schema.json");
+  // Multi-mod workspaces: every workspace mod may carry an overlay; later
+  // roots win on collisions (roots are passed in load order, mod-of-record
+  // first — collisions are rare and per-path).
+  const roots = modPath === null ? [] : Array.isArray(modPath) ? modPath : [modPath];
+  for (const root of roots) {
+    const overlayFile = path.join(root, ".ck3modding", "schema.json");
     try {
-      if (fs.existsSync(overlayFile)) {
-        const overlay = JSON.parse(fs.readFileSync(overlayFile, "utf8")) as SchemaOverlay;
-        for (const e of overlay.entries ?? []) {
-          if (typeof e?.path !== "string" || typeof e?.kind !== "string") continue;
-          // Overlay entries replace bundled ones with the same path.
-          const i = entries.findIndex((x) => x.path === e.path);
-          if (i >= 0) entries[i] = e;
-          else entries.push(e);
-        }
-        for (const f of overlay.refFields ?? []) {
-          if (typeof f?.key !== "string" || !Array.isArray(f?.kinds)) continue;
-          refFields.set(f.key, f);
-        }
-        for (const [prefix, kinds] of Object.entries(overlay.prefixRefs ?? {})) {
-          if (Array.isArray(kinds)) prefixRefs[prefix] = kinds;
-        }
-        log?.(`schema overlay loaded from ${overlayFile}`);
+      if (!fs.existsSync(overlayFile)) continue;
+      const overlay = JSON.parse(fs.readFileSync(overlayFile, "utf8")) as SchemaOverlay;
+      for (const e of overlay.entries ?? []) {
+        if (typeof e?.path !== "string" || typeof e?.kind !== "string") continue;
+        // Overlay entries replace bundled ones with the same path.
+        const i = entries.findIndex((x) => x.path === e.path);
+        if (i >= 0) entries[i] = e;
+        else entries.push(e);
       }
+      for (const f of overlay.refFields ?? []) {
+        if (typeof f?.key !== "string" || !Array.isArray(f?.kinds)) continue;
+        refFields.set(f.key, f);
+      }
+      for (const [prefix, kinds] of Object.entries(overlay.prefixRefs ?? {})) {
+        if (Array.isArray(kinds)) prefixRefs[prefix] = kinds;
+      }
+      log?.(`schema overlay loaded from ${overlayFile}`);
     } catch (err) {
       log?.(`schema overlay ignored (${overlayFile}): ${String(err)}`);
     }

@@ -80,13 +80,19 @@ function labelEdges(data: ServerData, edges: EventGraphEdge[], sites: Map<EventG
   }
 }
 
-export function computeEventGraph(data: ServerData, params: EventGraphParams): EventGraph {
+export function computeEventGraph(
+  data: ServerData,
+  params: EventGraphParams,
+  inFocus: (file: string) => boolean = () => true
+): EventGraph {
   const maxNodes = params.maxNodes ?? DEFAULT_MAX_NODES;
 
-  // Definitions per file, sorted by line, to resolve a reference's containing definition.
+  // Definitions per file, sorted by line, to resolve a reference's containing
+  // definition. The focus filter scopes the graph to one workspace mod: edges
+  // originate only from focus files (targets may resolve anywhere).
   const defsByFile = new Map<string, Array<{ name: string; kind: string; line: number }>>();
   for (const def of data.index.allDefinitions()) {
-    if (def.source !== "mod" || !GRAPH_KINDS.has(def.kind)) continue;
+    if (def.source !== "mod" || !GRAPH_KINDS.has(def.kind) || !inFocus(def.file)) continue;
     const key = def.file.toLowerCase();
     let list = defsByFile.get(key);
     if (!list) defsByFile.set(key, (list = []));
