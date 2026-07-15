@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="media/logo.png" alt="CK3 Modding Toolkit" width="120">
+<img src="media/banner.png" alt="CK3 Modding Toolkit">
 
 # CK3 Modding Toolkit for VS Code
 
