@@ -202,12 +202,20 @@ function buildHtml(webview: vscode.Webview): string {
   .wname { font-weight: 600; }
   .meta { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
   .hidden { display: none; }
+  /* Filtering without parents flattens the indentation of the matches. */
+  #tree.noparents ul.branch { padding-left: 0; }
+  #parentsWrap {
+    display: flex; align-items: center; gap: 4px; flex: 0 0 auto;
+    color: var(--vscode-descriptionForeground); user-select: none; cursor: pointer;
+    white-space: nowrap;
+  }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="toolbar">
     <input id="filter" type="text" placeholder="filter by type or name…" />
+    <label id="parentsWrap" title="Show the ancestors of filter matches"><input id="parents" type="checkbox" /> parents</label>
     <button id="expand">Expand all</button>
     <button id="collapse">Collapse</button>
     <button id="refresh">Refresh</button>
@@ -220,6 +228,7 @@ const vscode = acquireVsCodeApi();
 const treeEl = document.getElementById("tree");
 const statusEl = document.getElementById("status");
 const filterEl = document.getElementById("filter");
+const parentsEl = document.getElementById("parents");
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -294,25 +303,39 @@ function render(tree, file) {
 function applyFilter() {
   const q = filterEl.value.trim().toLowerCase();
   const rows = treeEl.querySelectorAll(".row");
+  const showParents = parentsEl.checked;
+  treeEl.classList.toggle("noparents", !!q && !showParents);
   if (!q) {
-    rows.forEach((r) => r.parentElement.classList.remove("hidden"));
+    rows.forEach((r) => { r.classList.remove("hidden"); r.parentElement.classList.remove("hidden"); });
     return;
   }
-  // Show matches and their ancestors.
-  rows.forEach((r) => r.parentElement.classList.add("hidden"));
-  rows.forEach((r) => {
-    if (r.dataset.text.indexOf(q) >= 0) {
-      let el = r.parentElement;
-      while (el && el !== treeEl) {
-        if (el.tagName === "LI") el.classList.remove("hidden");
-        if (el.tagName === "UL") el.classList.remove("hidden");
-        el = el.parentElement;
+  if (showParents) {
+    // Matches in their place, ancestors kept for context.
+    rows.forEach((r) => { r.classList.remove("hidden"); r.parentElement.classList.add("hidden"); });
+    rows.forEach((r) => {
+      if (r.dataset.text.indexOf(q) >= 0) {
+        let el = r.parentElement;
+        while (el && el !== treeEl) {
+          if (el.tagName === "LI") el.classList.remove("hidden");
+          if (el.tagName === "UL") el.classList.remove("hidden");
+          el = el.parentElement;
+        }
       }
-    }
+    });
+    return;
+  }
+  // Default: matches only, no parent rows (#1). Non-matching rows hide
+  // individually while their subtree containers stay open, so matched
+  // descendants render as a flat result list.
+  rows.forEach((r) => {
+    r.parentElement.classList.remove("hidden");
+    r.classList.toggle("hidden", r.dataset.text.indexOf(q) < 0);
   });
+  treeEl.querySelectorAll("ul.branch").forEach((ul) => ul.classList.remove("hidden"));
 }
 
 filterEl.addEventListener("input", applyFilter);
+parentsEl.addEventListener("change", applyFilter);
 document.getElementById("expand").addEventListener("click", () => {
   treeEl.querySelectorAll("ul.branch").forEach((ul) => ul.classList.remove("hidden"));
   treeEl.querySelectorAll(".twist").forEach((t) => { if (t.textContent) t.textContent = "▾"; });

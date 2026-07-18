@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+Fixes for the first GitHub issue reports (#1-#5).
+
+### Fixed
+- **Find references shows actual usage sites from vanilla and read-only
+  parent mods** (#3). Those roots are not reference-indexed up front (memory
+  guard), so a name used only by vanilla files previously listed nothing but
+  its definition sites. References now run an on-demand scan over the
+  un-indexed roots, memoized per name; workspace-mod references are unchanged.
+- **Go to Definition lists every source, mod first** (#4). Definitions from
+  the game folder and parent mods were hidden whenever a mod override existed;
+  seeing both is exactly how an unintended override gets noticed, so the
+  shadowed sites are now included after the mod's own.
+- **Inline `scripted_trigger` / `scripted_effect` declarations in event files
+  are indexed** (#5). Go to Definition, references, hover and completion now
+  see them like their `common/` counterparts, including `$PARAM$` harvesting
+  and doc comments.
+- **Datatype chain completion works after a dot in `.gui` and `.yml` files**
+  (#2). Completion items now carry an explicit replace range for the typed
+  chain segment; before, the editor filtered `[GetPlayer.` member suggestions
+  against the whole dotted word (and would have replaced it), so the popup
+  came up empty.
+
+### Added
+- **GUI tree filter shows matches only, with a "parents" toggle** (#1).
+  Filtering the widget tree no longer interleaves every ancestor row with the
+  matches; tick "parents" next to the filter box to bring the ancestor
+  context back.
+
 ## 0.1.1 (alpha)
 
 First batch of fixes and features driven by community feedback on the 0.1.0
