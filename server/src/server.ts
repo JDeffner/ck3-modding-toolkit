@@ -80,6 +80,7 @@ import {
 } from "./index/indexer";
 import { extractDefinitions } from "./index/extract";
 import { extractReferences } from "./index/references";
+import { LazyReferenceScanner, type LazyRefRoot } from "./index/lazyRefs";
 import { ModOriginResolver } from "./index/modOrigin";
 import { loadSchema, type SchemaData } from "./schema/loader";
 import { VARIABLE_KINDS } from "../../shared/src/schema/ck3Schema";
@@ -157,6 +158,19 @@ data.modRootOf = (file) => modOrigin.rootFor(file);
 
 function refreshModOrigin(): void {
   modOrigin.setRoots([...(settings.modPath ? [settings.modPath] : []), ...parentRoots()]);
+}
+
+/** On-demand reference search over the roots buildIndex leaves out of the
+ * ReferenceIndex: read-only dependency parents and vanilla (#3, AD-4). */
+const lazyRefs = new LazyReferenceScanner();
+
+function refreshLazyRefs(): void {
+  const wsMods = new Set(workspaceModRoots().map((r) => r.toLowerCase()));
+  const roots: LazyRefRoot[] = parentRoots()
+    .filter((r) => !wsMods.has(r.toLowerCase()))
+    .map((root) => ({ root, source: "parent" as const }));
+  if (settings.gamePath) roots.push({ root: settings.gamePath, source: "vanilla" });
+  lazyRefs.setRoots(roots, isEngineToken);
 }
 
 /** Focus predicate for the mod-scoped overview requests: with a `modRoot`
@@ -521,6 +535,7 @@ async function buildIndex(): Promise<void> {
   namespacesByFile.clear();
   data.modNamespaces.clear();
   refreshModOrigin();
+  refreshLazyRefs();
   harvestEngineData();
   indexing = true;
   sendStatus();
@@ -805,7 +820,7 @@ connection.onCompletion((params) => {
       end: params.position,
     });
     const result =
-      provideDataFnCompletion(data.dataTypes, data.dataFnUsage, linePrefix, data.index) ??
+      provideDataFnCompletion(data.dataTypes, data.dataFnUsage, linePrefix, data.index, params.position) ??
       provideFormatTagCompletion(data.textFormatting, linePrefix);
     return result ? { isIncomplete: result.isIncomplete, items: result.items } : [];
   }
@@ -916,7 +931,9 @@ connection.onReferences((params) => {
   const doc = documents.get(params.textDocument.uri);
   // Loc files too: references on a loc key line list its script usage sites.
   if (!doc || (doc.languageId !== "paradox" && doc.languageId !== "paradox-loc")) return [];
-  return provideReferences(data, doc, params.position, params.context.includeDeclaration);
+  return provideReferences(data, doc, params.position, params.context.includeDeclaration, (name) =>
+    lazyRefs.lookup(name)
+  );
 });
 
 connection.onPrepareRename((params) => {

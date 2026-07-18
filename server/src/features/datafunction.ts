@@ -194,18 +194,46 @@ function memberRank(usage: DataFnUsage, owner: string | null, name: string): num
 
 // ---- completion ----------------------------------------------------------------
 
+/** Cursor position for explicit replace ranges (line of `linePrefix`). */
+export interface DataFnCursor {
+  line: number;
+  character: number;
+}
+
 /**
  * Completion inside a [ ... ] expression, or null when the cursor is not in
  * one (caller falls through to its normal provider).
+ *
+ * When `cursor` is given, every item carries a textEdit replacing exactly the
+ * typed tail segment. Without it, the client derives the replace range from
+ * its word pattern — which includes "." for gui/loc files, so after
+ * `[GetPlayer.` the word is the whole dotted chain: member items neither match
+ * the filter nor insert correctly (#2).
  */
 export function provideDataFnCompletion(
   data: DataTypesData,
   usage: DataFnUsage,
   linePrefix: string,
-  index?: DefinitionIndex
+  index?: DefinitionIndex,
+  cursor?: DataFnCursor
 ): CompletionResult | null {
   const expr = datafunctionExprAt(linePrefix);
   if (expr === null) return null;
+
+  /** finalize + anchor each survivor to replace exactly the typed `partial`. */
+  const finish = (items: CompletionItem[], partial: string): CompletionResult => {
+    const result = finalize(items, partial, MAX_ITEMS);
+    if (cursor) {
+      const range = {
+        start: { line: cursor.line, character: cursor.character - partial.length },
+        end: { line: cursor.line, character: cursor.character },
+      };
+      for (const item of result.items) {
+        item.textEdit = { range, newText: item.insertText ?? item.label };
+      }
+    }
+    return result;
+  };
 
   // Inside a cast literal `'(CFixedPoint)…'`: complete the datatype name. Comes
   // before the function-argument branch, since the cast sits inside a call too
@@ -220,7 +248,7 @@ export function provideDataFnCompletion(
       sortText: type,
       data: { t: "dfn" },
     }));
-    return finalize(items, partial, MAX_ITEMS);
+    return finish(items, partial);
   }
 
   // Inside a '...' literal argument: the definition index for functions whose
@@ -263,7 +291,7 @@ export function provideDataFnCompletion(
         });
       }
     }
-    return finalize(items, call.literalPrefix, MAX_ITEMS);
+    return finish(items, call.literalPrefix);
   }
 
   // After `|`: formatting suffixes observed in vanilla ( |E, |U, |V0, … ).
@@ -278,7 +306,7 @@ export function provideDataFnCompletion(
         sortText: freq3(count) + suffix,
         data: { t: "dfn" },
       }));
-    return finalize(items, fmt[1], MAX_ITEMS);
+    return finish(items, fmt[1]);
   }
 
   const chain = chainAtEnd(expr);
@@ -328,7 +356,7 @@ export function provideDataFnCompletion(
         data: { t: "dfn" },
       });
     }
-    return finalize(items, typed, MAX_ITEMS);
+    return finish(items, typed);
   }
 
   // Member position: resolve the chain to a type when the tables allow it.
@@ -364,7 +392,7 @@ export function provideDataFnCompletion(
         data: { t: "dfn" },
       });
     }
-    return finalize(items, typed, MAX_ITEMS);
+    return finish(items, typed);
   }
 
   // Chain the tables cannot resolve (unknown start, missing return type…):
@@ -382,7 +410,7 @@ export function provideDataFnCompletion(
         data: { t: "dfn" },
       });
     }
-    return finalize(items, typed, MAX_ITEMS);
+    return finish(items, typed);
   }
   for (const [name, count] of usage.memberPool) {
     items.push({
@@ -393,7 +421,7 @@ export function provideDataFnCompletion(
       data: { t: "dfn" },
     });
   }
-  return finalize(items, typed, MAX_ITEMS);
+  return finish(items, typed);
 }
 
 // ---- hover ----------------------------------------------------------------------

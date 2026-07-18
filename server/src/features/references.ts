@@ -1,25 +1,39 @@
 /**
- * Find-all-references over the reference index (mod usage sites), optionally
+ * Find-all-references over the reference index (workspace-mod usage sites)
+ * merged with the on-demand vanilla/parent scan (#3 — without it, a name used
+ * only by vanilla files listed nothing but its definitions), optionally
  * including the definition sites.
  */
 import type { Location, Position } from "vscode-languageserver/node";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
+import type { Reference } from "../../../shared/src/types";
 import type { ServerData } from "../serverData";
 import { wordRangeAt } from "../wordAt";
 import { getLineText } from "../documents";
 
-export function provideReferences(
+export async function provideReferences(
   data: ServerData,
   document: TextDocument,
   position: Position,
-  includeDeclaration: boolean
-): Location[] {
+  includeDeclaration: boolean,
+  lazyRefs?: (name: string) => Promise<Reference[]>
+): Promise<Location[]> {
   const range = wordRangeAt(getLineText(document, position.line), position.character);
   if (!range) return [];
   const name = stripPrefix(range.word);
 
-  const locations: Location[] = data.refIndex.lookup(name).map((r) => ({
+  const refs: Reference[] = data.refIndex.lookup(name).slice();
+  if (lazyRefs) {
+    // The textual scan cannot tell a non-top-level definition site (inline
+    // scripted_trigger, nested title) from a use: drop hits the definition
+    // index already knows, they are appended under includeDeclaration below.
+    const isDefSite = (r: Reference) =>
+      data.index.inFile(r.file).some((d) => d.name === name && d.line === r.line);
+    refs.push(...(await lazyRefs(name)).filter((r) => !isDefSite(r)));
+  }
+
+  const locations: Location[] = refs.map((r) => ({
     uri: URI.file(r.file).toString(),
     range: {
       start: { line: r.line, character: r.startChar },
