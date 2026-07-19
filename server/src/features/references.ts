@@ -4,6 +4,7 @@
  * only by vanilla files listed nothing but its definitions), optionally
  * including the definition sites.
  */
+import * as path from "path";
 import type { Location, Position } from "vscode-languageserver/node";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
@@ -11,6 +12,13 @@ import type { Reference } from "../../../shared/src/types";
 import type { ServerData } from "../serverData";
 import { wordRangeAt } from "../wordAt";
 import { getLineText } from "../documents";
+
+/** file+line key with the DefinitionIndex's path normalization (win32 is
+ * case-insensitive), so lazy-scan paths compare equal to indexed ones. */
+function siteKey(file: string, line: number): string {
+  const n = path.normalize(file);
+  return `${process.platform === "win32" ? n.toLowerCase() : n}|${line}`;
+}
 
 export async function provideReferences(
   data: ServerData,
@@ -28,9 +36,8 @@ export async function provideReferences(
     // The textual scan cannot tell a non-top-level definition site (inline
     // scripted_trigger, nested title) from a use: drop hits the definition
     // index already knows, they are appended under includeDeclaration below.
-    const isDefSite = (r: Reference) =>
-      data.index.inFile(r.file).some((d) => d.name === name && d.line === r.line);
-    refs.push(...(await lazyRefs(name)).filter((r) => !isDefSite(r)));
+    const defSites = new Set(data.index.lookupAll(name).map((d) => siteKey(d.file, d.line)));
+    refs.push(...(await lazyRefs(name)).filter((r) => !defSites.has(siteKey(r.file, r.line))));
   }
 
   const locations: Location[] = refs.map((r) => ({

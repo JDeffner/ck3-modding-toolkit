@@ -46,6 +46,9 @@ describe("provideReferences", () => {
     ]);
     const lazy: Reference[] = [
       { name: "shared_effect", kinds: ["scripted_effect"], file: "/game/events/v.txt", line: 9, startChar: 1, endChar: 14 },
+      // Textual hit at a known definition site (an inline declaration is not
+      // at column 0): must be dropped, includeDeclaration covers it.
+      { name: "shared_effect", kinds: [], file: "/mod/common/scripted_effects/a.txt", line: 4, startChar: 17, endChar: 30 },
     ];
     const locations = await provideReferences(data, doc, { line: 0, character: 3 }, false, () =>
       Promise.resolve(lazy)
