@@ -23,6 +23,7 @@ pnpm-lock.yaml
 pnpm-workspace.yaml
 **/*.map
 *.vsix
+media/banner.png
 # esbuild-bundled diag/audit scripts land in dist/ — never ship them.
 dist/*.cjs
 # Build-time input for shared/data/dataTypes.json (bundled into dist/server.js).

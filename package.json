@@ -2,7 +2,7 @@
   "name": "ck3-modding-toolkit",
   "displayName": "CK3 Modding Toolkit",
   "description": "Crusader Kings III modding toolkit: completion, go-to-definition, hover docs, ck3-tiger diagnostics, inline localization, event graph and GUI preview.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "JDeffner",
   "author": {
     "name": "Joël Deffner"
@@ -713,6 +713,7 @@
     "test": "vitest run",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package --allow-missing-repository --no-dependencies",
+    "testp": "node scripts/package-preview.mjs",
     "compile:client": "esbuild client/src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
     "compile:server": "esbuild server/src/server.ts --bundle --outfile=dist/server.js --format=cjs --platform=node --target=node18",
     "watch:server": "esbuild server/src/server.ts --bundle --outfile=dist/server.js --format=cjs --platform=node --target=node18 --watch"
