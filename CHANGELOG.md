@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Fixes for the first GitHub issue reports (#1-#5).
+Fixes for the first GitHub issue reports (#1-#4).
 
 ### Fixed
 - **Find references shows actual usage sites from vanilla and read-only
@@ -14,10 +14,6 @@ Fixes for the first GitHub issue reports (#1-#5).
   the game folder and parent mods were hidden whenever a mod override existed;
   seeing both is exactly how an unintended override gets noticed, so the
   shadowed sites are now included after the mod's own.
-- **Inline `scripted_trigger` / `scripted_effect` declarations in event files
-  are indexed** (#5). Go to Definition, references, hover and completion now
-  see them like their `common/` counterparts, including `$PARAM$` harvesting
-  and doc comments.
 - **Datatype chain completion works after a dot in `.gui` and `.yml` files**
   (#2). Completion items now carry an explicit replace range for the typed
   chain segment; before, the editor filtered `[GetPlayer.` member suggestions
