@@ -127,8 +127,11 @@ export async function runSetup(deps: SetupDeps): Promise<void> {
   }
 }
 
-/** One-time nudge on first activation without a configured game path. */
+/** One-time nudge on first activation without a configured game path. Only in
+ * actual CK3 workspaces — fresh installs must not be nagged in unrelated
+ * projects. */
 export function maybeNudgeSetup(context: vscode.ExtensionContext, cfg: Ck3Config): void {
+  if (!cfg.isCk3Workspace) return;
   if (cfg.gamePath) return;
   if (context.globalState.get<boolean>("ck3.setupNudged")) return;
   void context.globalState.update("ck3.setupNudged", true);

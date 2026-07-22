@@ -1,5 +1,56 @@
 # Changelog
 
+## Unreleased
+
+Fixes for the first GitHub issue reports (#1-#4), plus default hotkeys and a
+quieter footprint outside CK3 workspaces.
+
+### Fixed
+- **Find references shows actual usage sites from vanilla and read-only
+  parent mods** (#3). Those roots are not reference-indexed up front (memory
+  guard), so a name used only by vanilla files previously listed nothing but
+  its definition sites. References now run an on-demand scan over the
+  un-indexed roots, memoized per name; workspace-mod references are unchanged.
+- **Go to Definition lists every source, mod first** (#4). Definitions from
+  the game folder and parent mods were hidden whenever a mod override existed;
+  seeing both is exactly how an unintended override gets noticed, so the
+  shadowed sites are now included after the mod's own.
+- **Datatype chain completion works after a dot in `.gui` and `.yml` files**
+  (#2). Completion items now carry an explicit replace range for the typed
+  chain segment; before, the editor filtered `[GetPlayer.` member suggestions
+  against the whole dotted word (and would have replaced it), so the popup
+  came up empty.
+
+### Added
+- **GUI tree filter shows matches only, with a working ancestors toggle**
+  (#1). Filtering the widget tree no longer interleaves every ancestor row
+  with the matches; the "Hide ancestors" button restores the context. The
+  first cut shipped this as a checkbox that silently did nothing unless
+  filter text was present; the button is now also live in the idle tree:
+  select a node and toggle it (`h` in the panel, `Ctrl+Alt+H` from anywhere)
+  to focus on that node's subtree, Esc to clear. Single click previews the
+  source line without stealing focus from the tree; double click jumps into
+  the editor. The button disables itself when there is nothing it could do.
+- **Default keybindings for the everyday commands** — GUI layout preview
+  `Ctrl+Alt+P`, widget tree `Ctrl+Alt+W`, event graph `Ctrl+Alt+G`,
+  dependencies `Ctrl+Alt+D`, run tiger `Ctrl+Alt+V`, localization
+  side-by-side `Ctrl+Alt+L`, jump to script reference `Ctrl+Alt+J`, open
+  `.info` docs `Ctrl+Alt+O`, GUI-tree ancestors toggle `Ctrl+Alt+H`. All are
+  scoped to CK3 editors by when-clauses (nothing fires in other projects),
+  and every `CK3:` command stays freely remappable in the Keyboard Shortcuts
+  UI.
+
+### Changed
+- **Invisible outside CK3 workspaces.** The status bar item, the CK3
+  activity-bar icon with its views, and the `CK3:` palette commands now only
+  appear when the workspace actually contains a mod or a game install (or
+  `ck3.modPath` points at one) — like language extensions that stay out of
+  the way in unrelated projects. The one-time setup nudge follows the same
+  rule. Bootstrap commands stay reachable everywhere: `CK3: Run Setup &
+  Health Check`, tiger download, tutorial, image guidelines, DDS conversion
+  and descriptor creation. Bare `.info` files outside the game's `_*.info`
+  naming are no longer claimed either.
+
 ## 0.1.1 (alpha)
 
 First batch of fixes and features driven by community feedback on the 0.1.0

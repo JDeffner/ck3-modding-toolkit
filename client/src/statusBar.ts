@@ -23,7 +23,13 @@ export class Ck3StatusBar implements vscode.Disposable {
     this.item.name = "CK3 Modding Toolkit";
     this.item.command = "ck3.setup";
     this.item.text = "$(loading~spin) CK3";
-    this.item.show();
+  }
+
+  /** Shown only in CK3 workspaces; hidden (not disposed) elsewhere so it can
+   * reappear when a mod folder is added to the workspace. */
+  setVisible(visible: boolean): void {
+    if (visible) this.item.show();
+    else this.item.hide();
   }
 
   update(s: Ck3Status): void {

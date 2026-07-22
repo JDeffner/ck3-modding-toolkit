@@ -5,7 +5,7 @@
  */
 import * as vscode from "vscode";
 import type { Ck3Config } from "./config";
-import { isUnder, looksLikeMod } from "./config";
+import { isUnder } from "./config";
 
 /**
  * The explorer resolves file icons from static language associations only, so
@@ -16,9 +16,7 @@ import { isUnder, looksLikeMod } from "./config";
  * scope) win; we only fill gaps, once.
  */
 export async function ensureFileAssociations(cfg: Ck3Config): Promise<void> {
-  if (!cfg.enableForWorkspace) return;
-  const isModWorkspace = (cfg.modPath !== null && looksLikeMod(cfg.modPath)) || cfg.workspaceMods.length > 0;
-  if (!isModWorkspace) return;
+  if (!cfg.isCk3Workspace) return;
   if (!vscode.workspace.workspaceFolders?.length) return;
   const wanted: Record<string, string> = {
     "*.txt": "paradox",

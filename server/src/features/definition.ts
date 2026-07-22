@@ -1,10 +1,13 @@
 /**
- * Go-to-definition for script identifiers: mod definitions shadow vanilla;
- * if none match after shadowing, fall back to everything known.
+ * Go-to-definition for script identifiers: every source is listed (a mod
+ * override AND the vanilla/parent originals), mod definitions first. Showing
+ * the shadowed sites too is deliberate — an unintended override of a vanilla
+ * or parent-mod name is exactly what a modder wants to notice (#4, #5).
  */
 import type { Location, Position } from "vscode-languageserver/node";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
+import type { DefSource } from "../../../shared/src/types";
 import type { ServerData } from "../serverData";
 import { wordRangeAt } from "../wordAt";
 import { getLineText } from "../documents";
@@ -37,7 +40,7 @@ export function provideLocDefinition(data: ServerData, document: TextDocument, p
   // Quoted arguments ('RelationToMe') are most often custom loc names: when
   // both meanings exist, prefer the customizable_localization definitions.
   if (lineText[start - 1] === "'" && locations.length > 1) {
-    const custom = data.index.lookup(word).filter((d) => d.kind === "customizable_localization");
+    const custom = orderedDefs(data, word).filter((d) => d.kind === "customizable_localization");
     if (custom.length > 0) {
       return custom.map((d) => toLocation(d.file, d.line));
     }
@@ -45,10 +48,17 @@ export function provideLocDefinition(data: ServerData, document: TextDocument, p
   return locations;
 }
 
+/** Mod first, then parent, then vanilla; insertion order within a source. */
+const SOURCE_ORDER: Record<DefSource, number> = { mod: 0, parent: 1, vanilla: 2 };
+
+function orderedDefs(data: ServerData, word: string) {
+  return [...data.index.lookupAll(word)].sort(
+    (a, b) => SOURCE_ORDER[a.source] - SOURCE_ORDER[b.source]
+  );
+}
+
 function lookupLocations(data: ServerData, word: string): Location[] {
-  let defs = data.index.lookup(word);
-  if (defs.length === 0) defs = data.index.lookupAll(word);
-  return defs.map((d) => toLocation(d.file, d.line));
+  return orderedDefs(data, word).map((d) => toLocation(d.file, d.line));
 }
 
 function toLocation(file: string, line: number): Location {

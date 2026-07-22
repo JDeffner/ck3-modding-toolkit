@@ -230,6 +230,37 @@ describe("datafunction completion", () => {
     expect(provideDataFnCompletion(data, emptyUsage(), "desc = my_loc")).toBeNull();
     expect(provideDataFnCompletion(data, emptyUsage(), '"[NoSuchType.')!.items).toEqual([]);
   });
+
+  it("anchors items to the typed tail segment when a cursor is given (#2)", () => {
+    // The gui/loc word pattern includes "." — without an explicit range the
+    // client would filter and replace against the whole dotted chain.
+    const line = 'text = "[GetPlayer.GetFa';
+    const result = provideDataFnCompletion(data, emptyUsage(), line, undefined, {
+      line: 3,
+      character: line.length,
+    })!;
+    const item = result.items.find((i) => i.label === "GetFather")!;
+    expect(item.textEdit).toEqual({
+      range: {
+        start: { line: 3, character: line.length - "GetFa".length },
+        end: { line: 3, character: line.length },
+      },
+      newText: "GetFather",
+    });
+    // Right after the dot the replace range is empty at the cursor.
+    const atDot = provideDataFnCompletion(data, emptyUsage(), 'text = "[Character.', undefined, {
+      line: 0,
+      character: 19,
+    })!;
+    const member = atDot.items.find((i) => i.label === "IsAlive")!;
+    expect(member.textEdit).toEqual({
+      range: { start: { line: 0, character: 19 }, end: { line: 0, character: 19 } },
+      newText: "IsAlive",
+    });
+    // Without a cursor the items stay range-free (legacy callers).
+    const plain = provideDataFnCompletion(data, emptyUsage(), line)!;
+    expect(plain.items.find((i) => i.label === "GetFather")!.textEdit).toBeUndefined();
+  });
 });
 
 describe("datafunction hover", () => {

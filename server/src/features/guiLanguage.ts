@@ -105,7 +105,7 @@ export function provideGuiCompletion(
   });
 
   // Inside a [ ... ] datafunction expression → data types / promotes / functions.
-  const dataFn = provideDataFnCompletion(data.dataTypes, data.dataFnUsage, linePrefix, data.index);
+  const dataFn = provideDataFnCompletion(data.dataTypes, data.dataFnUsage, linePrefix, data.index, pos);
   if (dataFn !== null) return dataFn;
 
   // Quoted asset path (`texture = "gfx/interface/ico`) → directory-segment drill-down.
