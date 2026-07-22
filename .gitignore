@@ -10,6 +10,8 @@ docs/*
 !docs/diagnostics/
 !docs/gui-designer/
 !docs/guides/
+# The wire contract external clients code against — public, versioned.
+!docs/PROTOCOL.md
 # Machine-specific paths for scripts/tests (copy dev-paths.example.json).
 dev-paths.json
 # Build-time copy of the server bundle data (scripts/copy-server.mjs).
