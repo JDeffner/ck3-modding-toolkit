@@ -53,7 +53,7 @@ describe("provideReferences", () => {
     const locations = await provideReferences(data, doc, { line: 0, character: 3 }, false, () =>
       Promise.resolve(lazy)
     );
-    expect(locations.map((l) => URI.parse(l.uri).fsPath)).toEqual([
+    expect(locations.map((l) => URI.parse(l.uri).fsPath.replace(/\\/g, "/"))).toEqual([
       "/mod/events/e.txt",
       "/game/events/v.txt",
     ]);
