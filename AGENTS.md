@@ -123,13 +123,28 @@ git tag v<version> && git push origin v<version>
 (NOT `git merge` and not `git merge --squash` — with the disjoint histories
 both produce add/add conflicts or drag dev's history into main.)
 
-The tag push triggers `.github/workflows/release.yml`: build, test, package,
-GitHub Release with the vsix attached. Publishing to the VS Code Marketplace
-is a manual workflow run with "publish" checked; it needs the `VSCE_PAT` repo
-secret (Azure DevOps PAT, scope Marketplace→Manage) and the publisher
-**JDeffner** created once at marketplace.visualstudio.com/manage. Keep the
-minor version odd while pre-release (0.1.x, 0.3.x — Marketplace convention);
-vsix builds use `--pre-release` until 1.0.
+Then create a GitHub Release from the tag — the Release drives everything
+(`.github/workflows/release.yml`):
+
+- Release with "Set as a pre-release" checked → build, test, vsix attached
+  to the Release, published to the Marketplace as a **pre-release**.
+- Release without the checkbox → same, published as a **full release**.
+- Deleting a Release (either kind) removes that version from the
+  Marketplace, so the previous version is served as latest again
+  (`scripts/marketplace-remove-version.mjs`).
+- Manual `workflow_dispatch` remains as an escape hatch, e.g. to re-run a
+  failed Marketplace publish without recreating the Release.
+
+Needs the `VSCE_PAT` repo secret (Azure DevOps PAT, scope Marketplace→Manage)
+and the publisher **JDeffner** created once at
+marketplace.visualstudio.com/manage. Marketplace rules to keep in mind:
+
+- A version number publishes exactly once — a version shipped as pre-release
+  (e.g. 0.1.2) can never be promoted to a full release; bump instead.
+- Keep the minor version odd while pre-release (0.1.x, 0.3.x) and even for
+  full releases — Marketplace convention.
+- Rollback only changes what the Marketplace serves; users who already
+  auto-updated keep the deleted version until something newer ships.
 
 Gotchas:
 - Delete stray `dist/*.cjs` (harvest/eval bundles) before `vsce package` —

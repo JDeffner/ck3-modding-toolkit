@@ -1,19 +1,33 @@
-# Release pipeline. Two entry points:
+# Release pipeline, driven by GitHub Releases (see AGENTS.md "Releasing"):
 #
-#  - Push a tag `v*` (e.g. v0.1.0): builds, tests, packages the vsix and
-#    attaches it to a GitHub Release. No Marketplace interaction.
-#  - Run the workflow manually with "publish" checked: additionally publishes
-#    the vsix to the VS Code Marketplace. Needs the VSCE_PAT repo secret
-#    (Azure DevOps PAT with Marketplace > Manage scope) — see AGENTS.md
-#    "Releasing".
+#  - Publish a Release with "Set as a pre-release" checked: builds, tests,
+#    attaches the vsix to the Release, and publishes it to the VS Code
+#    Marketplace as a PRE-RELEASE.
+#  - Publish a normal Release: same, published as a FULL release.
+#  - Delete a Release (either kind): that version is removed from the
+#    Marketplace, so the previously published version is "latest" again.
+#  - workflow_dispatch stays as a manual escape hatch (e.g. re-publish after
+#    a failed Marketplace step without recreating the Release).
 #
-# The "prerelease" input controls the Marketplace pre-release flag (alpha/beta
-# channel users must opt in inside VS Code). Keep it on until 1.0.
+# Needs the VSCE_PAT repo secret (Azure DevOps PAT, Marketplace > Manage).
+# Marketplace rules this pipeline can't bend:
+#  - A version number publishes exactly once — a version shipped as
+#    pre-release can never be promoted to a full release; bump instead.
+#  - Keep the minor version odd for pre-releases, even for full releases
+#    (0.1.x pre / 0.2.x full — Marketplace convention).
+#  - Rollback only changes what the Marketplace serves; users who already
+#    auto-updated keep the deleted version until something newer ships.
 name: Release
 
+# Publishes and rollbacks must not interleave (e.g. deleting a release
+# moments after publishing one).
+concurrency:
+  group: release-pipeline
+  cancel-in-progress: false
+
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published, deleted]
   workflow_dispatch:
     inputs:
       publish:
@@ -26,12 +40,13 @@ on:
         default: true
 
 jobs:
-  release:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.action == 'published'
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the GitHub Release
+      contents: write # attach the vsix to the GitHub Release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4 # release events check out the release tag
 
       - uses: pnpm/action-setup@v4
         with:
@@ -54,10 +69,33 @@ jobs:
       # Everything in dist/ ships in the vsix; stray harvest bundles must not.
       - run: rm -f dist/*.cjs
 
+      # The Marketplace channel follows the GitHub Release's pre-release
+      # checkbox (or the manual input on workflow_dispatch).
+      - name: Resolve pre-release flag
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            PRE="${{ github.event.release.prerelease }}"
+          else
+            PRE="${{ inputs.prerelease }}"
+          fi
+          echo "PRERELEASE=$PRE" >> "$GITHUB_ENV"
+
+      # vsce packages whatever package.json says; a mismatched tag would
+      # silently publish the wrong version, so fail fast instead.
+      - name: Check tag matches package.json version
+        if: github.event_name == 'release'
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "v$PKG" != "$TAG" ]; then
+            echo "::error::package.json version ($PKG) does not match release tag ($TAG)"
+            exit 1
+          fi
+
       - name: Package vsix
         run: |
           FLAG=""
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.prerelease }}" = "true" ]; then FLAG="--pre-release"; fi
+          if [ "$PRERELEASE" = "true" ]; then FLAG="--pre-release"; fi
           npx vsce package $FLAG --no-dependencies
 
       - uses: actions/upload-artifact@v4
@@ -65,19 +103,53 @@ jobs:
           name: vsix
           path: "*.vsix"
 
-      - name: GitHub Release (tag builds)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: "*.vsix"
-          prerelease: true
-          generate_release_notes: true
+      - name: Attach vsix to the GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" *.vsix --clobber
 
       - name: Publish to Marketplace
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        if: github.event_name == 'release' || inputs.publish
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           FLAG=""
-          if [ "${{ inputs.prerelease }}" = "true" ]; then FLAG="--pre-release"; fi
+          if [ "$PRERELEASE" = "true" ]; then FLAG="--pre-release"; fi
           npx vsce publish $FLAG --no-dependencies --packagePath *.vsix
+
+  # Deleting the GitHub Release rolls the Marketplace back: remove exactly
+  # that version so the previous one is served as latest again.
+  rollback:
+    if: github.event_name == 'release' && github.event.action == 'deleted'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # The deleted release's tag may be gone too — build from main, which
+      # has the rollback script and the publisher/name in package.json.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Remove version from Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Release tag '$TAG' is not a version tag; nothing to roll back."; exit 0 ;;
+          esac
+          node scripts/marketplace-remove-version.mjs "${TAG#v}"
