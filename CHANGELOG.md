@@ -21,10 +21,15 @@ Fixes for the first GitHub issue reports (#1-#4).
   came up empty.
 
 ### Added
-- **GUI tree filter shows matches only, with a "parents" toggle** (#1).
-  Filtering the widget tree no longer interleaves every ancestor row with the
-  matches; tick "parents" next to the filter box to bring the ancestor
-  context back.
+- **GUI tree filter shows matches only, with a working ancestors toggle**
+  (#1). Filtering the widget tree no longer interleaves every ancestor row
+  with the matches; the "Hide ancestors" button restores the context. The
+  first cut shipped this as a checkbox that silently did nothing unless
+  filter text was present; the button is now also live in the idle tree:
+  select a node and toggle it (`h` in the panel, `Ctrl+Alt+H` from anywhere)
+  to focus on that node's subtree, Esc to clear. Single click previews the
+  source line without stealing focus from the tree; double click jumps into
+  the editor. The button disables itself when there is nothing it could do.
 
 ## 0.1.1 (alpha)
 

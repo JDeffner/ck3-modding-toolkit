@@ -257,6 +257,12 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "ck3.guiTreeToggleParents",
+        "category": "CK3",
+        "title": "GUI Tree: Toggle Ancestors / Subtree Focus",
+        "enablement": "activeWebviewPanelId == ck3.guiTree"
+      },
+      {
         "command": "ck3.showGuiPreview",
         "category": "CK3",
         "title": "Preview GUI Layout",
@@ -621,6 +627,10 @@
         {
           "command": "ck3.addLocalizationFromView",
           "when": "false"
+        },
+        {
+          "command": "ck3.guiTreeToggleParents",
+          "when": "activeWebviewPanelId == ck3.guiTree"
         }
       ],
       "view/title": [
@@ -703,6 +713,11 @@
         "command": "ck3.editLocalization",
         "key": "ctrl+alt+t",
         "when": "editorTextFocus && (editorLangId == paradox || editorLangId == paradox-loc)"
+      },
+      {
+        "command": "ck3.guiTreeToggleParents",
+        "key": "ctrl+alt+h",
+        "when": "activeWebviewPanelId == ck3.guiTree"
       }
     ]
   },

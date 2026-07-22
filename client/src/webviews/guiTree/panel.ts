@@ -2,13 +2,14 @@ import * as vscode from "vscode";
 import type { GuiTree } from "../../../../shared/src/protocol";
 
 /** Messages the webview sends to the host. */
-type InboundMessage = { type: "open"; line: number } | { type: "refresh" };
+type InboundMessage = { type: "open"; line: number; focus?: boolean } | { type: "refresh" };
 
 /** Messages the host sends to the webview. */
 type OutboundMessage =
   | { type: "tree"; tree: GuiTree; file: string }
   | { type: "error"; message: string }
-  | { type: "loading" };
+  | { type: "loading" }
+  | { type: "toggleParents" };
 
 /**
  * Singleton GUI widget-tree webview: the .gui file's widget hierarchy as a
@@ -71,6 +72,11 @@ export class GuiTreePanel {
     GuiTreePanel.instance = new GuiTreePanel(fetchTree, source);
   }
 
+  /** `ck3.guiTreeToggleParents`: flip the ancestors toggle in the live panel. */
+  static toggleParents(): void {
+    GuiTreePanel.instance?.post({ type: "toggleParents" });
+  }
+
   private dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -108,9 +114,11 @@ export class GuiTreePanel {
       try {
         const doc = await vscode.workspace.openTextDocument(this.sourceUri);
         const position = new vscode.Position(Math.max(0, msg.line), 0);
+        // Single click previews (focus stays in the tree, so hotkeys keep
+        // working); double click hands focus to the editor.
         await vscode.window.showTextDocument(doc, {
           viewColumn: vscode.ViewColumn.One,
-          preserveFocus: false,
+          preserveFocus: msg.focus !== true,
           selection: new vscode.Range(position, position),
         });
       } catch (err) {
@@ -191,6 +199,10 @@ function buildHtml(webview: vscode.Webview): string {
     white-space: nowrap;
   }
   .row:hover { background: var(--vscode-list-hoverBackground, rgba(128,128,128,0.15)); }
+  .row.selected {
+    background: var(--vscode-list-activeSelectionBackground, rgba(64,128,255,0.35));
+    color: var(--vscode-list-activeSelectionForeground, inherit);
+  }
   .twist { width: 14px; flex: 0 0 auto; text-align: center; user-select: none; opacity: 0.75; }
   .badge {
     padding: 0 6px; border-radius: 8px; font-size: 0.85em; flex: 0 0 auto;
@@ -204,18 +216,19 @@ function buildHtml(webview: vscode.Webview): string {
   .hidden { display: none; }
   /* Filtering without parents flattens the indentation of the matches. */
   #tree.noparents ul.branch { padding-left: 0; }
-  #parentsWrap {
-    display: flex; align-items: center; gap: 4px; flex: 0 0 auto;
-    color: var(--vscode-descriptionForeground); user-select: none; cursor: pointer;
-    white-space: nowrap;
+  #toolbar button.active {
+    color: var(--vscode-button-foreground, #fff);
+    background: var(--vscode-button-background, #0e639c);
+    border-color: transparent;
   }
+  #toolbar button:disabled { opacity: 0.45; cursor: default; }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="toolbar">
-    <input id="filter" type="text" placeholder="filter by type or name…" />
-    <label id="parentsWrap" title="Show the ancestors of filter matches"><input id="parents" type="checkbox" /> parents</label>
+    <input id="filter" type="text" placeholder="filter by type or name…  (/)" />
+    <button id="ancestors" aria-pressed="true">Hide ancestors</button>
     <button id="expand">Expand all</button>
     <button id="collapse">Collapse</button>
     <button id="refresh">Refresh</button>
@@ -228,7 +241,25 @@ const vscode = acquireVsCodeApi();
 const treeEl = document.getElementById("tree");
 const statusEl = document.getElementById("status");
 const filterEl = document.getElementById("filter");
-const parentsEl = document.getElementById("parents");
+const ancestorsBtn = document.getElementById("ancestors");
+
+// One button, two contexts: while filtering it flattens matches (hideAncestors,
+// the #1 behavior, on by default); in the idle tree with a selected node it
+// focuses on that node's subtree (focusMode, off by default).
+let hideAncestors = true;
+let focusMode = false;
+let selectedLine = null;
+
+function selectedRow() {
+  return selectedLine === null ? null : treeEl.querySelector('.row[data-line="' + selectedLine + '"]');
+}
+
+function updateSelection() {
+  treeEl.querySelectorAll(".row.selected").forEach((r) => r.classList.remove("selected"));
+  const row = selectedRow();
+  if (row) row.classList.add("selected");
+  else selectedLine = null;
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -269,7 +300,14 @@ function renderNode(node) {
 
   row.addEventListener("click", (ev) => {
     ev.stopPropagation();
+    selectedLine = node.line;
+    updateSelection();
+    applyFilter();
     vscode.postMessage({ type: "open", line: node.line });
+  });
+  row.addEventListener("dblclick", (ev) => {
+    ev.stopPropagation();
+    vscode.postMessage({ type: "open", line: node.line, focus: true });
   });
 
   li.appendChild(row);
@@ -303,13 +341,28 @@ function render(tree, file) {
 function applyFilter() {
   const q = filterEl.value.trim().toLowerCase();
   const rows = treeEl.querySelectorAll(".row");
-  const showParents = parentsEl.checked;
-  treeEl.classList.toggle("noparents", !!q && !showParents);
+  const sel = selectedRow();
+  ancestorsBtn.disabled = !q && !sel;
+  const active = q ? hideAncestors : focusMode && !!sel;
+  ancestorsBtn.classList.toggle("active", active);
+  ancestorsBtn.setAttribute("aria-pressed", String(active));
+  ancestorsBtn.title = q
+    ? "Show only the filter matches, without their ancestor rows (h)"
+    : sel
+      ? "Focus on the selected node's subtree (h) — Esc clears the selection"
+      : "Type a filter or select a node first (h)";
+  treeEl.classList.toggle("noparents", !!q && hideAncestors);
   if (!q) {
     rows.forEach((r) => { r.classList.remove("hidden"); r.parentElement.classList.remove("hidden"); });
+    if (sel && focusMode) {
+      // Focus mode: the selected node's subtree only, everything else hidden.
+      rows.forEach((r) => r.classList.add("hidden"));
+      sel.parentElement.querySelectorAll(".row").forEach((r) => r.classList.remove("hidden"));
+      sel.classList.remove("hidden");
+    }
     return;
   }
-  if (showParents) {
+  if (!hideAncestors) {
     // Matches in their place, ancestors kept for context.
     rows.forEach((r) => { r.classList.remove("hidden"); r.parentElement.classList.add("hidden"); });
     rows.forEach((r) => {
@@ -334,8 +387,33 @@ function applyFilter() {
   treeEl.querySelectorAll("ul.branch").forEach((ul) => ul.classList.remove("hidden"));
 }
 
+function toggleAncestors() {
+  if (filterEl.value.trim() !== "") hideAncestors = !hideAncestors;
+  else if (selectedRow()) focusMode = !focusMode;
+  else return;
+  applyFilter();
+}
+
 filterEl.addEventListener("input", applyFilter);
-parentsEl.addEventListener("change", applyFilter);
+ancestorsBtn.addEventListener("click", toggleAncestors);
+window.addEventListener("keydown", (ev) => {
+  if (ev.target === filterEl) {
+    if (ev.key === "Escape") { filterEl.value = ""; applyFilter(); filterEl.blur(); }
+    return;
+  }
+  if (ev.key === "h" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+    ev.preventDefault();
+    toggleAncestors();
+  } else if (ev.key === "/") {
+    ev.preventDefault();
+    filterEl.focus();
+  } else if (ev.key === "Escape") {
+    selectedLine = null;
+    focusMode = false;
+    updateSelection();
+    applyFilter();
+  }
+});
 document.getElementById("expand").addEventListener("click", () => {
   treeEl.querySelectorAll("ul.branch").forEach((ul) => ul.classList.remove("hidden"));
   treeEl.querySelectorAll(".twist").forEach((t) => { if (t.textContent) t.textContent = "▾"; });
@@ -351,7 +429,8 @@ window.addEventListener("message", (ev) => {
   if (!msg) return;
   if (msg.type === "loading") statusEl.textContent = "Loading…";
   else if (msg.type === "error") statusEl.textContent = "Error: " + msg.message;
-  else if (msg.type === "tree") { render(msg.tree, msg.file); applyFilter(); }
+  else if (msg.type === "tree") { render(msg.tree, msg.file); updateSelection(); applyFilter(); }
+  else if (msg.type === "toggleParents") toggleAncestors();
 });
 </script>
 </body>

@@ -482,6 +482,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         editor.document
       );
     }),
+    vscode.commands.registerCommand("ck3.guiTreeToggleParents", () => GuiTreePanel.toggleParents()),
     vscode.commands.registerCommand("ck3.showGuiPreview", () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || !editor.document.uri.fsPath.toLowerCase().endsWith(".gui")) {
