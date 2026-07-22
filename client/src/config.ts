@@ -36,6 +36,12 @@ export interface Ck3Config {
   diagnosticsIgnorePatterns: string[];
   /** When false (default) tiger/our diagnostics skip files under the game path. */
   diagnosticsVanilla: boolean;
+  /** True when this workspace actually holds CK3 content (a mod or a game
+   * install) and the extension is enabled — the gate for all visible UI
+   * (status bar, sidebar views, palette commands). The machine-scope
+   * ck3.gamePath setting deliberately does NOT count: it is set once per
+   * machine and would light the extension up in every window. */
+  isCk3Workspace: boolean;
   /** Human-readable problems found while validating paths. */
   warnings: string[];
 }
@@ -194,6 +200,12 @@ export function readConfig(): Ck3Config {
   for (const p of workspaceMods) addParent(p);
 
   const tigerRunOn = cfg.get<string>("tigerRunOn") === "manual" ? "manual" : "save";
+  const enableForWorkspace = cfg.get<boolean>("enableForWorkspace") ?? true;
+  const isCk3Workspace =
+    enableForWorkspace &&
+    (workspaceGameDir !== null ||
+      (modPath !== null && looksLikeMod(modPath)) ||
+      workspaceMods.length > 0);
 
   return {
     gamePath,
@@ -206,10 +218,11 @@ export function readConfig(): Ck3Config {
     locLanguage: (cfg.get<string>("locLanguage") ?? "english").trim().toLowerCase() || "english",
     scopeInlayHints: cfg.get<boolean>("scopeInlayHints") ?? false,
     tigerRunOn,
-    enableForWorkspace: cfg.get<boolean>("enableForWorkspace") ?? true,
+    enableForWorkspace,
     diagnosticsIgnore: sanitizeStringList(cfg.get("diagnostics.ignore")),
     diagnosticsIgnorePatterns: sanitizeStringList(cfg.get("diagnostics.ignorePatterns")),
     diagnosticsVanilla: cfg.get<boolean>("diagnostics.vanilla") ?? false,
+    isCk3Workspace,
     warnings,
   };
 }

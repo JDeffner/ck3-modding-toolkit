@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-Fixes for the first GitHub issue reports (#1-#4).
+Fixes for the first GitHub issue reports (#1-#4), plus default hotkeys and a
+quieter footprint outside CK3 workspaces.
 
 ### Fixed
 - **Find references shows actual usage sites from vanilla and read-only
@@ -38,6 +39,17 @@ Fixes for the first GitHub issue reports (#1-#4).
   scoped to CK3 editors by when-clauses (nothing fires in other projects),
   and every `CK3:` command stays freely remappable in the Keyboard Shortcuts
   UI.
+
+### Changed
+- **Invisible outside CK3 workspaces.** The status bar item, the CK3
+  activity-bar icon with its views, and the `CK3:` palette commands now only
+  appear when the workspace actually contains a mod or a game install (or
+  `ck3.modPath` points at one) — like language extensions that stay out of
+  the way in unrelated projects. The one-time setup nudge follows the same
+  rule. Bootstrap commands stay reachable everywhere: `CK3: Run Setup &
+  Health Check`, tiger download, tutorial, image guidelines, DDS conversion
+  and descriptor creation. Bare `.info` files outside the game's `_*.info`
+  naming are no longer claimed either.
 
 ## 0.1.1 (alpha)
 

@@ -62,8 +62,8 @@
         "aliases": [
           "CK3 Format Docs"
         ],
-        "extensions": [
-          ".info"
+        "filenamePatterns": [
+          "**/_*.info"
         ],
         "configuration": "./language-configuration.json",
         "icon": {
@@ -588,37 +588,43 @@
           "id": "ck3.tools",
           "name": "Tools",
           "icon": "media/ck3-view.svg",
-          "visibility": "visible"
+          "visibility": "visible",
+          "when": "ck3.isCk3Workspace"
         },
         {
           "id": "ck3.overview",
           "name": "Mod Overview",
           "icon": "media/ck3-view.svg",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "when": "ck3.isCk3Workspace"
         },
         {
           "id": "ck3.problems",
           "name": "Problems by Type",
           "icon": "media/ck3-view.svg",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "when": "ck3.isCk3Workspace"
         },
         {
           "id": "ck3.locCoverage",
           "name": "Localization Coverage",
           "icon": "media/ck3-view.svg",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "when": "ck3.isCk3Workspace"
         },
         {
           "id": "ck3.overrides",
           "name": "Overrides & Conflicts",
           "icon": "media/ck3-view.svg",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "when": "ck3.isCk3Workspace"
         },
         {
           "id": "ck3.dependencies",
           "name": "Dependencies",
           "icon": "media/ck3-view.svg",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "when": "ck3.isCk3Workspace"
         }
       ]
     },
@@ -631,6 +637,110 @@
         {
           "command": "ck3.guiTreeToggleParents",
           "when": "activeWebviewPanelId == ck3.guiTree"
+        },
+        {
+          "command": "ck3.reloadScriptDocs",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.dumpIndexStats",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.runTiger",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.editLocalization",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.openLocalizationSideBySide",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.jumpToScriptReference",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.createTranslation",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.createTranslationMod",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.pickFocusMod",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.excludeMods",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.openInfoDocs",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.openVanillaExamples",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.refreshViews",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.showEventGraph",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.showDependencies",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.showGuiTree",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.showGuiPreview",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.modReport",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.tigerCreateBaseline",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.tigerToggleBaseline",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.tigerUnused",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.tigerGenerateConf",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.watchErrorLog",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.launchGame",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.translateNext",
+          "when": "ck3.isCk3Workspace"
+        },
+        {
+          "command": "ck3.newContent",
+          "when": "ck3.isCk3Workspace"
         }
       ],
       "view/title": [
@@ -670,17 +780,17 @@
       "editor/title": [
         {
           "command": "ck3.showGuiTree",
-          "when": "resourceExtname == .gui",
+          "when": "resourceExtname == .gui && ck3.isCk3Workspace",
           "group": "navigation"
         },
         {
           "command": "ck3.showGuiPreview",
-          "when": "resourceExtname == .gui",
+          "when": "resourceExtname == .gui && ck3.isCk3Workspace",
           "group": "navigation"
         },
         {
           "command": "ck3.showEventGraph",
-          "when": "resourceExtname == .txt && resourcePath =~ /events|on_action|decisions/",
+          "when": "resourceExtname == .txt && resourcePath =~ /events|on_action|decisions/ && ck3.isCk3Workspace",
           "group": "navigation"
         },
         {
@@ -715,11 +825,6 @@
         "when": "editorTextFocus && (editorLangId == paradox || editorLangId == paradox-loc)"
       },
       {
-        "command": "ck3.guiTreeToggleParents",
-        "key": "ctrl+alt+h",
-        "when": "activeWebviewPanelId == ck3.guiTree"
-      },
-      {
         "command": "ck3.showGuiPreview",
         "key": "ctrl+alt+p",
         "when": "editorTextFocus && editorLangId == paradox-gui"
@@ -728,6 +833,11 @@
         "command": "ck3.showGuiTree",
         "key": "ctrl+alt+w",
         "when": "editorTextFocus && editorLangId == paradox-gui"
+      },
+      {
+        "command": "ck3.guiTreeToggleParents",
+        "key": "ctrl+alt+h",
+        "when": "activeWebviewPanelId == ck3.guiTree"
       },
       {
         "command": "ck3.showEventGraph",

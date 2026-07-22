@@ -146,6 +146,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     indexing: true,
   };
   const updateStatus = () => {
+    // The visible surface (status bar, sidebar views, palette commands) follows
+    // the workspace: present in CK3 workspaces, absent elsewhere. Both change
+    // handlers below run through here, so this tracks folder/setting changes.
+    statusBar.setVisible(cfg.isCk3Workspace);
+    void vscode.commands.executeCommand("setContext", "ck3.isCk3Workspace", cfg.isCk3Workspace);
     statusBar.update({
       tokens: lastServerStatus.tokens,
       tokensFromScriptDocs: lastServerStatus.tokensFromScriptDocs,
