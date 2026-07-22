@@ -14,3 +14,4 @@ docs/*
 dev-paths.json
 # Build-time copy of the server bundle data (scripts/copy-server.mjs).
 packages/vscode/data/
+*.tar.gz

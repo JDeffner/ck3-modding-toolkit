@@ -24,3 +24,5 @@ jobs:
       - name: Package (vsix)
         working-directory: packages/vscode
         run: npx vsce package --allow-missing-repository --no-dependencies
+      - name: Build server tarball
+        run: node scripts/build-server-tarball.mjs

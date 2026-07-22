@@ -17,6 +17,7 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import type { Definition } from "@paradox-lsp/protocol/types";
 import {
@@ -665,10 +666,31 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
   const init = (params.initializationOptions ?? {}) as Partial<Ck3InitOptions>;
   storageDir = init.storageDir ?? "";
   wikidocsDir = init.wikidocsDir ?? "";
+  if (init.settings) settings = init.settings;
+
+  // Bare-client fallbacks: the VSCode client sends fully resolved paths; a
+  // plain LSP client (neovim over --stdio) may send partial settings or none.
+  if (!wikidocsDir) {
+    // dist/server.js sits next to data/ck3/ in the repo checkout, the .vsix
+    // and the release tarball alike.
+    const bundled = path.resolve(__dirname, "..", "data", "ck3", "wikidocs");
+    if (fs.existsSync(bundled)) wikidocsDir = bundled;
+  }
   // freqs.json ships next to wikidocs/ (both under data/ck3/); derive it from
   // wikidocsDir so no new client-side wiring is needed. Fail-soft if empty.
   freqsDir = wikidocsDir ? path.dirname(wikidocsDir) : "";
-  if (init.settings) settings = init.settings;
+  if (!storageDir) {
+    storageDir = path.join(os.tmpdir(), "paradox-lsp");
+    try {
+      fs.mkdirSync(storageDir, { recursive: true });
+    } catch {
+      storageDir = "";
+    }
+  }
+  if (!settings.modPath && !settings.workspaceMods?.length) {
+    const rootUri = params.workspaceFolders?.[0]?.uri ?? params.rootUri ?? null;
+    if (rootUri?.startsWith("file:")) settings.modPath = URI.parse(rootUri).fsPath;
+  }
 
   return {
     capabilities: {
