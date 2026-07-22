@@ -22,7 +22,7 @@ import {
   StreamMessageWriter,
   type MessageConnection,
 } from "vscode-jsonrpc/node";
-import { statusNotification, type Ck3StatusPayload } from "@paradox-lsp/protocol/protocol";
+import { statusNotification, type StatusPayload } from "@paradox-lsp/protocol/protocol";
 
 // PARADOX_LSP_SERVER overrides the bundle under test — used to smoke the
 // extracted release tarball with the exact same flow.
@@ -54,7 +54,7 @@ describe.skipIf(!hasServer)("LSP smoke over --stdio with bare-client fallbacks",
   let modDir: string;
   let eventsUri: string;
   let exited: Promise<number | null>;
-  const statuses: Ck3StatusPayload[] = [];
+  const statuses: StatusPayload[] = [];
 
   beforeAll(async () => {
     modDir = fs.mkdtempSync(path.join(os.tmpdir(), "ck3-stdio-smoke-"));
@@ -71,7 +71,7 @@ describe.skipIf(!hasServer)("LSP smoke over --stdio with bare-client fallbacks",
     child = spawn(process.execPath, [SERVER, "--stdio"], { stdio: ["pipe", "pipe", "pipe"] });
     exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
     conn = createMessageConnection(new StreamMessageReader(child.stdout!), new StreamMessageWriter(child.stdin!));
-    conn.onNotification(statusNotification, (p: Ck3StatusPayload) => {
+    conn.onNotification(statusNotification, (p: StatusPayload) => {
       statuses.push(p);
     });
     conn.onNotification(() => undefined); // swallow diagnostics / logMessage

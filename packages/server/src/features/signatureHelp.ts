@@ -42,7 +42,7 @@ export function provideSignatureHelp(
       if (idx >= 0) active = idx;
     }
 
-    // Align CK3Doc `@param NAME desc` tags (§E3) to the $PARAM$ names by NAME, so
+    // Align PdxDoc `@param NAME desc` tags (§E3) to the $PARAM$ names by NAME, so
     // the active parameter shows its description. Fail-soft: no doc → no text.
     const paramDoc = new Map<string, string>();
     for (const t of def.tags ?? []) {

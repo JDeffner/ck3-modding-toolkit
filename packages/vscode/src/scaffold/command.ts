@@ -74,12 +74,12 @@ async function pickKind(): Promise<Kind | undefined> {
     {
       value: "scripted_effect",
       label: "$(symbol-method) Scripted effect",
-      detail: "common/scripted_effects/ — with a CK3Doc stub",
+      detail: "common/scripted_effects/ — with a PdxDoc stub",
     },
     {
       value: "scripted_trigger",
       label: "$(symbol-boolean) Scripted trigger",
-      detail: "common/scripted_triggers/ — with a CK3Doc stub",
+      detail: "common/scripted_triggers/ — with a PdxDoc stub",
     },
   ];
   const pick = await vscode.window.showQuickPick<KindItem>(items, {

@@ -1,7 +1,7 @@
 /**
  * Bundled corpus-frequency tables (update plan v1.1 §C3), the ranking input for
  * Workstream C. Emitted by scripts/build-freqs.ts from a vanilla scan (+ optional
- * mod corpus) and shipped as packages/server/data/ck3/freqs.json. Loaded fail-soft: a
+ * mod corpus) and shipped as packages/server/data/<game>/freqs.json. Loaded fail-soft: a
  * missing/corrupt file yields empty tables and the extension ranks with a neutral
  * frequency bucket everywhere.
  *

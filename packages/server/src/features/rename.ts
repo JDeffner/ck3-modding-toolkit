@@ -10,6 +10,7 @@ import { URI } from "vscode-uri";
 import * as fs from "fs";
 import type { Definition } from "@paradox-lsp/protocol/types";
 import type { ServerData } from "../serverData";
+import { activeProfile } from "../games/active";
 import { wordRangeAt } from "../wordAt";
 import { getLineText } from "../documents";
 import { stripPrefix } from "./references";
@@ -64,7 +65,7 @@ export function provideRename(
 ): WorkspaceEdit {
   const target = targetAt(data, document, position);
   if (!VALID_NAME.test(newName)) {
-    throw new ResponseError(0, `"${newName}" is not a valid CK3 identifier.`);
+    throw new ResponseError(0, `"${newName}" is not a valid ${activeProfile().shortName} identifier.`);
   }
 
   const editsByUri = new Map<string, TextEdit[]>();

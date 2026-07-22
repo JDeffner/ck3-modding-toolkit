@@ -13,11 +13,11 @@ import { collectSavedScopeTypes, inferScopeAt } from "../src/scopes/inference";
 import { scopePrefixBefore, wordRangeAt } from "../src/wordAt";
 import { structureContextAt } from "../src/structure";
 import { loadSchema } from "../src/schema/loader";
-import { CK3_SCHEMA } from "../src/schema/ck3Schema";
+import { CK3_SCHEMA } from "../src/games/ck3/schema";
 import { CompletionFeature } from "../src/features/completion";
 import { provideHover } from "../src/features/hover";
 import { ServerData } from "../src/serverData";
-import type { Ck3SchemaEntry } from "../src/schema/types";
+import type { SchemaEntry } from "../src/schema/types";
 
 const schema = loadSchema(null);
 const interactionEntry = CK3_SCHEMA.find((e) => e.kind === "character_interaction")!;
@@ -283,7 +283,7 @@ describe("hover wiring (§B2/§B3)", () => {
 
 describe("schema data shape (§B2/§B3)", () => {
   it("attaches structure + ambientScopes to the interaction entry", () => {
-    const e: Ck3SchemaEntry = interactionEntry;
+    const e: SchemaEntry = interactionEntry;
     expect(e.structure?.topLevel.some((k) => k.key === "send_option")).toBe(true);
     expect(e.structure?.blocks?.send_option?.length).toBeGreaterThan(0);
     expect(e.ambientScopes?.map((a) => a.name)).toContain("actor");

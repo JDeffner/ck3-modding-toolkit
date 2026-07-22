@@ -88,9 +88,14 @@ vim.lsp.enable("paradox_lsp")
 
 You do NOT need to set a mod path: the server indexes the workspace root
 (your `root_markers` match) automatically. Extra optional settings, same
-shape as the VS Code extension: `parentPaths` (dependency mods, load order,
-base first), `diagnosticsIgnore` (codes to suppress),
-`diagnosticsIgnorePatterns` (globs), `scopeInlayHints` (default false).
+shape as the VS Code extension: `gameId` (game profile, defaults to `"ck3"`),
+`parentPaths` (dependency mods, load order, base first), `diagnosticsIgnore`
+(codes to suppress), `diagnosticsIgnorePatterns` (globs), `scopeInlayHints`
+(default false).
+
+Beyond standard LSP the server also answers custom `paradox/*` requests
+(overview data, GUI layout, …) — see `docs/PROTOCOL.md` in the repo; a plain
+editor client can ignore them entirely.
 
 On neovim 0.10, use `require("lspconfig.configs")` with the same `cmd`/
 `init_options` and `root_dir = require("lspconfig.util").root_pattern("descriptor.mod")`.

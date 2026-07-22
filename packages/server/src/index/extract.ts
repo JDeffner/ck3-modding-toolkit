@@ -6,7 +6,7 @@
  * No `vscode` imports here: unit-tested in plain Node.
  */
 import type { Definition, DefSource } from "@paradox-lsp/protocol/types";
-import type { Ck3SchemaEntry } from "../schema/types";
+import type { SchemaEntry } from "../schema/types";
 import { LineIndex, parseLoc, parseScript, walkStatements, type Statement } from "../parser";
 import { docForDefinition } from "./docComments";
 
@@ -19,7 +19,7 @@ const TITLE_KEY = /^[ekdcb]_[A-Za-z0-9_\-]+$/;
 
 export function extractDefinitions(
   content: string,
-  entry: Ck3SchemaEntry,
+  entry: SchemaEntry,
   file: string,
   source: DefSource
 ): Definition[] {

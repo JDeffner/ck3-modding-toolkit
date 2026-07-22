@@ -9,7 +9,7 @@
  * only exist in specific blocks of the kind; per AD-5 they are offered for the
  * whole file (rank/annotate, never hide) with the block noted in the doc.
  */
-import type { AmbientScope } from "./types";
+import type { AmbientScope } from "../../schema/types";
 
 const CHAR = "character";
 

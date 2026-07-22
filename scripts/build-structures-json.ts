@@ -3,7 +3,7 @@
  * `key = value` line in every `_*.info` schema doc the game ships, validated
  * against real usage counts in that folder's vanilla files, emitted as
  * packages/server/data/ck3/structures.json (bundled; merged UNDER the hand-curated
- * packages/server/src/schema/structures.ts at load time — curated docs always win).
+ * packages/server/src/games/ck3/structures.ts at load time — curated docs always win).
  *
  * Keys are kept when they are actually used in vanilla (count >= 3) or carry
  * a doc comment and appear at least once — this filters the .info files'
@@ -16,7 +16,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { CK3_SCHEMA } from "../packages/server/src/schema/ck3Schema";
+import { CK3_SCHEMA } from "../packages/server/src/games/ck3/schema";
 import { parseScript } from "../packages/server/src/parser";
 import { requireDevPath } from "./devPaths";
 

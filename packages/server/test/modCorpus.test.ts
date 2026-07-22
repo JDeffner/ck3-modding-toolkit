@@ -19,7 +19,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { parseScript, decode } from "../src/parser";
 import { scanRoot } from "../src/index/indexer";
 import { loadSchema } from "../src/schema/loader";
-import { CK3_SCHEMA } from "../src/schema/ck3Schema";
+import { CK3_SCHEMA } from "../src/games/ck3/schema";
 import { CompletionFeature } from "../src/features/completion";
 import { provideHover } from "../src/features/hover";
 import { ServerData } from "../src/serverData";
@@ -100,7 +100,7 @@ run("mod corpus (AGOT)", () => {
   );
 
   it(
-    "captures a CK3Doc block for a known documented AGOT effect (§E)",
+    "captures a PdxDoc block for a known documented AGOT effect (§E)",
     () => {
       const defs = scanRoot(CORPUS!, "mod", { locLanguage: "english" });
       // `# used in disburse_tour_activity_rewards on scope:host` sits directly

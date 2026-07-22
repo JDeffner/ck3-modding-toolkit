@@ -162,7 +162,7 @@ export function isShortExample(body: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// CK3Doc rendering (§E3)
+// PdxDoc rendering (§E3)
 // ---------------------------------------------------------------------------
 
 interface DocTagLike {
@@ -180,7 +180,7 @@ export interface DocBody {
 }
 
 /**
- * Turn CK3Doc prose + tags (§E) into the card's `doc`/`example` slots.
+ * Turn PdxDoc prose + tags (§E) into the card's `doc`/`example` slots.
  * Prose renders first, then structured tags compactly (§E3): `@param` as
  * `*@param NAME — desc*` lines, `@deprecated` as a prominent ⚠ line, other
  * recognized/unknown tags as compact italic lines. `@example` fills the fenced

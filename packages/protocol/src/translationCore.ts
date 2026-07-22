@@ -7,7 +7,7 @@
  */
 import * as path from "path";
 
-export const CK3_LANGUAGES = [
+export const LOC_LANGUAGES = [
   "english",
   "french",
   "german",
@@ -28,7 +28,7 @@ export function detectLocFileLanguage(filePath: string): string | null {
   const m = /_l_([a-z_]+)\.ya?ml$/i.exec(filePath);
   if (m) return m[1].toLowerCase();
   const segments = filePath.toLowerCase().split(/[\\/]/);
-  for (const lang of CK3_LANGUAGES) {
+  for (const lang of LOC_LANGUAGES) {
     if (segments.includes(lang)) return lang;
   }
   return null;

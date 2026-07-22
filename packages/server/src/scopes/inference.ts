@@ -11,7 +11,7 @@
 import { classifyKeyword, isExplicitKeyword } from "../contextKeywords";
 import { walkStatements, type ParseResult, type Statement } from "../parser";
 import { blockPathFromParse } from "../context";
-import type { Ck3SchemaEntry, KeySpec } from "../schema/types";
+import type { SchemaEntry, KeySpec } from "../schema/types";
 import type { Scope, ScopeModel } from "./model";
 
 export interface ScopeInference {
@@ -26,7 +26,7 @@ export interface InferenceContext {
   /** The file's schema entry: enables per-definition root-scope declarations
    *  (event `scope = X`, custom loc `type = X`, scripted_gui `scope = X`),
    *  structure keys with a documented block scope, and on_action roots. */
-  entry?: Ck3SchemaEntry | null;
+  entry?: SchemaEntry | null;
   /** on_action name → expected root scope (parsed from the user's on_actions.log). */
   onActionScopes?: ReadonlyMap<string, string>;
   /** Variable value types: "var:x" / "local_var:x" / "global_var:x" → scope set. */
@@ -43,12 +43,12 @@ export interface InferenceContext {
   /** Calling scopes of scripted effects/triggers/modifiers aggregated from
    *  their call sites: the root fallback when no `@scope` tag declares one. */
   callSiteScopes?: ReadonlyMap<string, Set<Scope>>;
-  /** CK3Doc `@scope` tag of a definition (scripted effects/triggers/values):
+  /** PdxDoc `@scope` tag of a definition (scripted effects/triggers/values):
    *  lets modders declare the calling scope of reusable script. */
   defScopeTag?: (name: string) => Set<Scope> | null;
 }
 
-/** Kinds whose root scope is the CALL SITE's — a CK3Doc `@scope` tag declares it. */
+/** Kinds whose root scope is the CALL SITE's — a PdxDoc `@scope` tag declares it. */
 const SCOPE_TAG_KINDS = new Set(["scripted_effect", "scripted_trigger", "script_value", "scripted_modifier"]);
 
 /** Keys that never change scope (grammar keywords, control flow, weights). */
@@ -151,7 +151,7 @@ export function rootScopesAt(
 }
 
 /** Structure key with a documented block scope for the entry's kind, if any. */
-function structureKeyScope(entry: Ck3SchemaEntry | null | undefined, key: string): string | undefined {
+function structureKeyScope(entry: SchemaEntry | null | undefined, key: string): string | undefined {
   const structure = entry?.structure;
   if (!structure) return undefined;
   const find = (specs: KeySpec[] | undefined): string | undefined => {

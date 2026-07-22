@@ -1,13 +1,13 @@
 /**
  * PdxGui language features (paradox-gui): completion, hover and template
  * navigation for .gui files, grounded in a build-time harvest of the vanilla
- * gui/ tree (packages/server/data/ck3/guiSchema.json: 600+ widget types with per-type
+ * gui/ tree (packages/server/data/<game>/guiSchema.json: 600+ widget types with per-type
  * property usage counts) plus the definition index's gui_type entries
  * (mod + vanilla `template X { }` / `type x = base { }` declarations).
  */
 import { CompletionItemKind, MarkupKind, type CompletionItem, type Hover, type Position } from "vscode-languageserver/node";
 import type { TextDocument } from "vscode-languageserver-textdocument";
-import GUI_SCHEMA_JSON from "../../data/ck3/guiSchema.json";
+import { activeProfile } from "../games/active";
 import type { ServerData } from "../serverData";
 import { blockStackFromParse } from "../context";
 import { getParse } from "../parseCache";
@@ -24,7 +24,7 @@ import { wordRangeAt } from "../wordAt";
 import { getLineText } from "../documents";
 import { renderCard, renderHover } from "./hoverRender";
 import { assetDirContext, provideAssetDirCompletion } from "./assetPaths";
-import type { Ck3Settings } from "@paradox-lsp/protocol/protocol";
+import type { ParadoxSettings } from "@paradox-lsp/protocol/protocol";
 import * as path from "path";
 import { URI } from "vscode-uri";
 
@@ -40,8 +40,25 @@ interface GuiSchemaShape {
   /** Enum keys observed with `|`-combined values (top|left, alphamask|…). */
   enumCombinable: string[];
 }
-const GUI: GuiSchemaShape = GUI_SCHEMA_JSON as unknown as GuiSchemaShape;
-const ENUM_COMBINABLE = new Set(GUI.enumCombinable ?? []);
+const EMPTY_GUI: GuiSchemaShape = { types: {}, globalProps: {}, enums: {}, enumCombinable: [] };
+// Memoized view of the active profile's bundled gui schema (absent for games
+// without a harvest: gui completion/hover degrade to index-only, fail-soft).
+let guiCacheKey: unknown = Symbol("unset");
+let guiCache: GuiSchemaShape = EMPTY_GUI;
+let combinableCache = new Set<string>();
+function guiSchema(): GuiSchemaShape {
+  const raw = activeProfile().guiSchema;
+  if (raw !== guiCacheKey) {
+    guiCacheKey = raw;
+    guiCache = (raw as GuiSchemaShape | undefined) ?? EMPTY_GUI;
+    combinableCache = new Set(guiCache.enumCombinable ?? []);
+  }
+  return guiCache;
+}
+function enumCombinable(): Set<string> {
+  guiSchema();
+  return combinableCache;
+}
 
 /** `key = a|b|par` in a value position: key + the value text typed so far. */
 const ENUM_VALUE_POSITION = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z0-9_|]*)$/;
@@ -72,12 +89,12 @@ function provideEnumCompletion(linePrefix: string): CompletionResult | null {
   const m = ENUM_VALUE_POSITION.exec(linePrefix);
   if (!m) return null;
   const key = m[1].toLowerCase();
-  const values = GUI.enums?.[key];
+  const values = guiSchema().enums?.[key];
   if (!values) return null;
   const segments = m[2].split("|");
   const partial = segments[segments.length - 1];
   const used = new Set(segments.slice(0, -1).map((s) => s.toLowerCase()));
-  const combinable = ENUM_COMBINABLE.has(key);
+  const combinable = enumCombinable().has(key);
   const items: CompletionItem[] = [];
   values.forEach((v, i) => {
     if (used.has(v)) return;
@@ -95,7 +112,7 @@ export function provideGuiCompletion(
   data: ServerData,
   document: TextDocument,
   offset: number,
-  settings?: Ck3Settings
+  settings?: ParadoxSettings
 ): CompletionResult {
   const { lineIndex } = getParse(document);
   const pos = lineIndex.positionAt(offset);
@@ -153,12 +170,12 @@ export function provideGuiCompletion(
 
   // Properties/children of the enclosing widget type (global stats when the
   // type is mod-defined and unknown to the vanilla harvest).
-  const typeInfo = enclosing ? GUI.types[enclosing] : null;
-  const props = typeInfo?.props ?? (enclosing ? GUI.globalProps : {});
+  const typeInfo = enclosing ? guiSchema().types[enclosing] : null;
+  const props = typeInfo?.props ?? (enclosing ? guiSchema().globalProps : {});
   const ranked = Object.entries(props).sort((a, b) => b[1] - a[1]);
   ranked.forEach(([key, count], i) => {
     seen.add(key);
-    const alsoType = key in GUI.types;
+    const alsoType = key in guiSchema().types;
     items.push({
       label: key,
       kind: alsoType ? CompletionItemKind.Class : CompletionItemKind.Property,
@@ -170,7 +187,7 @@ export function provideGuiCompletion(
   });
 
   // Remaining widget types (and everything at top level).
-  const types = Object.entries(GUI.types).sort((a, b) => b[1].count - a[1].count);
+  const types = Object.entries(guiSchema().types).sort((a, b) => b[1].count - a[1].count);
   types.forEach(([name, info], i) => {
     if (seen.has(name)) return;
     items.push({
@@ -217,7 +234,7 @@ export function provideGuiHover(
 
   const cards: string[] = [];
 
-  const typeInfo = GUI.types[lower];
+  const typeInfo = guiSchema().types[lower];
   if (typeInfo) {
     const top = Object.entries(typeInfo.props)
       .sort((a, b) => b[1] - a[1])
@@ -239,9 +256,9 @@ export function provideGuiHover(
   // belonging to an enum property named on the same line.
   const enumKey = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(lineText)?.[1]?.toLowerCase();
   if (enumKey && enumKey !== lower) {
-    const values = GUI.enums?.[enumKey];
+    const values = guiSchema().enums?.[enumKey];
     if (values && values.includes(lower)) {
-      const combinable = ENUM_COMBINABLE.has(enumKey);
+      const combinable = enumCombinable().has(enumKey);
       cards.push(
         renderCard({
           kind: "keyword",
@@ -257,8 +274,8 @@ export function provideGuiHover(
   }
 
   const enclosing = enclosingType(document, offset);
-  const encInfo = enclosing ? GUI.types[enclosing] : null;
-  const propCount = encInfo?.props[lower] ?? GUI.globalProps[lower];
+  const encInfo = enclosing ? guiSchema().types[enclosing] : null;
+  const propCount = encInfo?.props[lower] ?? guiSchema().globalProps[lower];
   if (!typeInfo && propCount) {
     cards.push(
       renderCard({

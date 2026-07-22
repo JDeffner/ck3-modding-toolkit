@@ -1,5 +1,5 @@
 /**
- * CK3Doc doc comments (§E): block attach/detach, separator skipping, tag
+ * PdxDoc doc comments (§E): block attach/detach, separator skipping, tag
  * parsing, prose cap, BOM/CRLF handling, and the three surfacing paths
  * (hover render, completion documentation, signature-help param alignment).
  */
@@ -13,9 +13,9 @@ import { provideSignatureHelp } from "../src/features/signatureHelp";
 import { CompletionFeature } from "../src/features/completion";
 import { loadSchema } from "../src/schema/loader";
 import { ServerData } from "../src/serverData";
-import type { Ck3SchemaEntry } from "../src/schema/types";
+import type { SchemaEntry } from "../src/schema/types";
 
-const EFFECT_ENTRY: Ck3SchemaEntry = {
+const EFFECT_ENTRY: SchemaEntry = {
   path: "common/scripted_effects",
   kind: "scripted_effect",
   extraction: "top-level-key",

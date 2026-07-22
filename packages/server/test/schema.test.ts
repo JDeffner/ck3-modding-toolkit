@@ -1,5 +1,5 @@
 /**
- * Fixture tests for the CK3 schema table (packages/server/src/schema/ck3Schema.ts).
+ * Fixture tests for the CK3 schema table (packages/server/src/games/ck3/schema.ts).
  *
  * These always run: they feed small inline fixtures in the real vanilla file
  * shape through extractDefinitions and assert the expected names/containers,
@@ -7,11 +7,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { extractDefinitions } from "../src/index/extract";
-import { CK3_SCHEMA, REF_FIELDS, PREFIX_REFS } from "../src/schema/ck3Schema";
-import type { Ck3SchemaEntry } from "../src/schema/types";
+import { CK3_SCHEMA, REF_FIELDS, PREFIX_REFS } from "../src/games/ck3/schema";
+import type { SchemaEntry } from "../src/schema/types";
 import type { Definition } from "@paradox-lsp/protocol/types";
 
-function entry(kind: string): Ck3SchemaEntry {
+function entry(kind: string): SchemaEntry {
   const e = CK3_SCHEMA.find((s) => s.kind === kind);
   if (!e) throw new Error(`no schema entry for kind ${kind}`);
   return e;

@@ -1,5 +1,5 @@
 /**
- * ck3/guiLayout request backend: lazily builds the cross-file template/type
+ * paradox/guiLayout request backend: lazily builds the cross-file template/type
  * store from the vanilla + mod gui trees (FIOS: path-sorted, first definition
  * wins; a mod file replaces the vanilla file at the same relative path), then
  * runs the measured layout engine over the requested document.

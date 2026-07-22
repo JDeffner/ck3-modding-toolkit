@@ -4,7 +4,7 @@
  * translation mod next to it: descriptor with a dependency on the source,
  * blanked loc files under localization/<lang>/replace/, and a TRANSLATE.md
  * with the workflow + AI prompt. Generation logic is pure and lives in
- * packages/protocol/src/translationMod.ts.
+ * ./translationBuild.ts.
  */
 import * as vscode from "vscode";
 import * as fs from "fs";
@@ -12,8 +12,8 @@ import * as path from "path";
 import type { Ck3Config } from "./config";
 import { listFiles } from "@paradox-lsp/protocol/fsWalk";
 import { parseDescriptor, readDescriptorName } from "@paradox-lsp/protocol/descriptorMod";
-import { CK3_LANGUAGES, detectLocFileLanguage } from "@paradox-lsp/protocol/translationCore";
-import { buildTranslationMod, type SourceLocFile } from "@paradox-lsp/protocol/translationMod";
+import { LOC_LANGUAGES, detectLocFileLanguage } from "@paradox-lsp/protocol/translationCore";
+import { buildTranslationMod, type SourceLocFile } from "./translationBuild";
 
 function uniqueRoots(cfg: Ck3Config): string[] {
   const out: string[] = [];
@@ -78,7 +78,7 @@ export async function createTranslationModCommand(cfg: Ck3Config, log: (msg: str
         });
   if (!sourceLang) return;
   let targetLang = await vscode.window.showQuickPick(
-    [...CK3_LANGUAGES.filter((l) => l !== sourceLang), "other..."],
+    [...LOC_LANGUAGES.filter((l) => l !== sourceLang), "other..."],
     { title: "Translate to", placeHolder: "Language the new mod provides" }
   );
   if (!targetLang) return;

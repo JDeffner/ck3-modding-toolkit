@@ -14,7 +14,7 @@ import { extractReferences } from "../src/index/references";
 import { extractDefinitions } from "../src/index/extract";
 import { structureContextAt } from "../src/structure";
 import { parseScript } from "../src/parser";
-import { CK3_SCHEMA } from "../src/schema/ck3Schema";
+import { CK3_SCHEMA } from "../src/games/ck3/schema";
 
 const schema = loadSchema(null);
 const eventEntry = CK3_SCHEMA.find((e) => e.kind === "event")!;

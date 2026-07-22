@@ -11,7 +11,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { ddsToPngDataUri } from "../dds";
 import { getLineText } from "../documents";
-import type { Ck3Settings } from "@paradox-lsp/protocol/protocol";
+import type { ParadoxSettings } from "@paradox-lsp/protocol/protocol";
 import { assetRoots, bareNameBaseDirs } from "./assetPaths";
 
 const DDS_PATH = /[A-Za-z0-9_\-./\\]+\.dds/gi;
@@ -44,7 +44,7 @@ function cachedDataUri(fsPath: string): string | null {
 }
 
 export function provideTextureHover(
-  settings: Ck3Settings,
+  settings: ParadoxSettings,
   document: TextDocument,
   position: Position,
   entryKind?: string | null

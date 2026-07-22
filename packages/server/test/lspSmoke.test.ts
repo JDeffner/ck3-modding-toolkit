@@ -1,9 +1,9 @@
 /**
  * End-to-end LSP smoke test: fork the PACKAGED server bundle (dist/server.js)
  * over node IPC exactly like the VS Code client does (TransportKind.ipc →
- * --node-ipc), drive the real protocol — initialize with Ck3InitOptions,
+ * --node-ipc), drive the real protocol — initialize with ParadoxInitOptions,
  * didOpen, completion + resolve, hover, definition, semantic tokens, the
- * ck3/guiTree request — and assert sane answers.
+ * paradox/guiTree request — and assert sane answers.
  *
  * This is the closest headless stand-in for a live VS Code pass: it exercises
  * the exact client↔server wiring (bundle, transport, init options, custom
@@ -26,7 +26,7 @@ import {
   guiTreeRequest,
   guiWidgetEditRequest,
   statusNotification,
-  type Ck3StatusPayload,
+  type StatusPayload,
 } from "@paradox-lsp/protocol/protocol";
 
 const SERVER = path.join(__dirname, "..", "dist", "server.js");
@@ -107,7 +107,7 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
   let eventsUri: string;
   let locFile: string;
   let locUri: string;
-  const statuses: Ck3StatusPayload[] = [];
+  const statuses: StatusPayload[] = [];
 
   beforeAll(async () => {
     modDir = fs.mkdtempSync(path.join(os.tmpdir(), "ck3-smoke-"));
@@ -130,7 +130,7 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
 
     child = fork(SERVER, ["--node-ipc"], { stdio: ["ignore", "pipe", "pipe", "ipc"], silent: true });
     conn = createMessageConnection(new IPCMessageReader(child), new IPCMessageWriter(child));
-    conn.onNotification(statusNotification, (p: Ck3StatusPayload) => {
+    conn.onNotification(statusNotification, (p: StatusPayload) => {
       statuses.push(p);
     });
     conn.onNotification(() => undefined); // swallow diagnostics etc.
@@ -208,7 +208,7 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(labels).toContain("save_scope_as");
     expect(labels).not.toContain("has_trait"); // trigger, not valid in an effect block
 
-    // Lazy docs: inline documentation absent, resolve fills it from the CK3Doc comment.
+    // Lazy docs: inline documentation absent, resolve fills it from the PdxDoc comment.
     const item = result.items.find((i) => i.label === "my_smoke_effect")!;
     expect(item.documentation).toBeUndefined();
     const resolved = (await conn.sendRequest("completionItem/resolve", item)) as {
@@ -296,8 +296,8 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(tokens.data.length).toBeGreaterThan(0);
   });
 
-  it("ck3/eventDetail answers with loc, options and refs", async () => {
-    const detail = (await conn.sendRequest("ck3/eventDetail", { id: "smoke.1" })) as {
+  it("paradox/eventDetail answers with loc, options and refs", async () => {
+    const detail = (await conn.sendRequest("paradox/eventDetail", { id: "smoke.1" })) as {
       id: string;
       title?: { key: string; text?: string };
       options: Array<{ name?: { key: string } }>;
@@ -312,8 +312,8 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(detail!.refs.some((r) => r.kind === "scripted_effect" && r.name === "my_smoke_effect")).toBe(true);
   });
 
-  it("ck3/dependencies resolves a definition's dependents and dependencies", async () => {
-    const result = (await conn.sendRequest("ck3/dependencies", { name: "smoke.1" })) as {
+  it("paradox/dependencies resolves a definition's dependents and dependencies", async () => {
+    const result = (await conn.sendRequest("paradox/dependencies", { name: "smoke.1" })) as {
       def: { name: string; kind: string } | null;
       dependents: Array<{ kind: string; items: Array<{ name: string }> }>;
       dependencies: Array<{ kind: string; items: Array<{ name: string }> }>;
@@ -325,7 +325,7 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(effects!.items.map((i) => i.name).sort()).toContain("my_smoke_effect");
   });
 
-  it("ck3/guiTree answers for gui text", async () => {
+  it("paradox/guiTree answers for gui text", async () => {
     const tree = (await conn.sendRequest(guiTreeRequest, {
       uri: "file:///smoke.gui",
       text: GUI_TXT,
@@ -335,7 +335,7 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(tree.nodes[0].name).toBe("smoke_root");
   });
 
-  it("ck3/guiLayout lays out gui text with measured rects", async () => {
+  it("paradox/guiLayout lays out gui text with measured rects", async () => {
     const result = (await conn.sendRequest(guiLayoutRequest, {
       uri: "file:///smoke.gui",
       text: `widget = {
@@ -356,7 +356,7 @@ describe.skipIf(!hasServer)("LSP smoke over node IPC (the client's transport)", 
     expect(result.textures).toEqual(["gfx/interface/colors/white.dds"]);
   });
 
-  it("ck3/guiWidgetEdit produces an applicable position edit", async () => {
+  it("paradox/guiWidgetEdit produces an applicable position edit", async () => {
     const text = `widget = {\n\ticon = {\n\t\tposition = { 30 20 }\n\t\tsize = { 40 40 }\n\t}\n}`;
     const edit = (await conn.sendRequest(guiWidgetEditRequest, {
       uri: "file:///smoke.gui",

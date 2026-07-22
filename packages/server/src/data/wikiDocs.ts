@@ -1,6 +1,6 @@
 /**
- * Parser for the CK3 wiki reference lists bundled in wikidocs/ (Markdown mirrors
- * of the Paradox wiki from https://github.com/jesec/ck3-modding-wiki).
+ * Parser for the wiki reference lists bundled in wikidocs/ (Markdown mirrors
+ * of the Paradox wiki; see wikidocs/ATTRIBUTION.md for provenance).
  *
  * These are a fallback and enrichment source for engine tokens: script_docs
  * output is authoritative for the user's exact game version, but the wiki lists
@@ -12,6 +12,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { TokenData, TokenKind } from "@paradox-lsp/protocol/types";
+import { activeProfile } from "../games/active";
 
 const NAME_RE = /^[A-Za-z0-9_.:]+$/;
 
@@ -147,7 +148,6 @@ export const WIKI_FILES: Array<{ file: string; parse: (md: string) => TokenData[
   { file: "Scopes_list.md", parse: parseWikiEventTargets },
 ];
 
-const WIKI_NOTE = "Source: CK3 wiki (may lag behind the current game version)";
 
 /** Parse all bundled wiki list files found in `dir`. Missing files are skipped. */
 export function loadWikiTokens(dir: string): TokenData[] {
@@ -172,10 +172,11 @@ export function mergeWikiTokens(scriptDocs: TokenData[], wiki: TokenData[]): Tok
   for (const t of scriptDocs) byKey.set(`${t.kind}:${t.name}`, t);
 
   const merged = [...scriptDocs];
+  const wikiNote = activeProfile().wikiNote;
   for (const w of wiki) {
     const existing = byKey.get(`${w.kind}:${w.name}`);
     if (!existing) {
-      const note = w.traits ? `${w.traits}\n${WIKI_NOTE}` : WIKI_NOTE;
+      const note = w.traits ? `${w.traits}\n${wikiNote}` : wikiNote;
       merged.push({ ...w, traits: note });
       continue;
     }

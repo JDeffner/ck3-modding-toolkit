@@ -10,7 +10,7 @@ import { provideHover } from "../src/features/hover";
 import { provideSemanticTokens } from "../src/features/semanticTokens";
 import { ServerData } from "../src/serverData";
 import { loadSchema } from "../src/schema/loader";
-import { CK3_SCHEMA } from "../src/schema/ck3Schema";
+import { CK3_SCHEMA } from "../src/games/ck3/schema";
 import type { TokenData } from "@paradox-lsp/protocol/types";
 
 const schema = loadSchema(null);

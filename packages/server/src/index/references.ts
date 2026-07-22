@@ -14,12 +14,12 @@
 import type { Definition, DefSource, Reference } from "@paradox-lsp/protocol/types";
 import {
   dynamicRefKinds,
-  BLOCK_REF_FIELDS,
   VARIABLE_SET_KINDS,
   VARIABLE_LIST_SET_KINDS,
   VARIABLE_READ_KINDS,
   VAR_PREFIX_KINDS,
-} from "../schema/ck3Schema";
+} from "../games/jomini/variables";
+import { activeProfile } from "../games/active";
 import { isLocProperty } from "@paradox-lsp/protocol/locProperties";
 import { classifyKeyword } from "../contextKeywords";
 import type { SchemaData } from "../schema/loader";
@@ -344,7 +344,7 @@ export function extractReferences(
             for (let i = ancestors.length - 1; i >= 0; i--) {
               const a = ancestors[i];
               if (a.kind === "assignment" && !a.key.quoted) {
-                const blockKinds = BLOCK_REF_FIELDS[a.key.text.toLowerCase()]?.[key];
+                const blockKinds = activeProfile().blockRefFields[a.key.text.toLowerCase()]?.[key];
                 if (blockKinds) pushRef(value.text, blockKinds, value.range.start);
                 break;
               }

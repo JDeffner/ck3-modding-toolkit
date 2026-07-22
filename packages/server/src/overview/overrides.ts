@@ -1,5 +1,5 @@
 /**
- * ck3/overrides: mod definitions that shadow vanilla or parent-mod content,
+ * paradox/overrides: mod definitions that shadow vanilla or parent-mod content,
  * annotated with the folder's load rule — script folders are last-in-or-same
  * ("LIOS", the mod wins), GUI is first-in-only ("FIOS", vanilla wins unless
  * the mod replaces the whole file at the same relative path). This is

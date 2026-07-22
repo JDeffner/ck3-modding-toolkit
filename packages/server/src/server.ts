@@ -1,7 +1,8 @@
 /**
- * CK3 language server entry point: owns the script_docs token data and the
+ * Language server entry point: owns the script_docs token data and the
  * definition index, and answers completion/hover/definition/semantic-token/
- * inlay-hint/code-action requests plus the ck3/* custom protocol.
+ * inlay-hint/code-action requests plus the paradox/* custom protocol.
+ * Game knowledge comes from the active GameProfile (games/).
  *
  * All heavy work (vanilla scan) runs here, out of the editor's extension host,
  * chunked so requests stay responsive, with LSP work-done progress.
@@ -28,9 +29,9 @@ import {
   modFileChangedNotification,
   reloadDocsRequest,
   statusNotification,
-  type Ck3InitOptions,
-  type Ck3Settings,
-  type Ck3StatusPayload,
+  type ParadoxInitOptions,
+  type ParadoxSettings,
+  type StatusPayload,
   type LocEntryInfo,
   type LookupLocParams,
   type ModFileChangeParams,
@@ -84,8 +85,10 @@ import { extractReferences } from "./index/references";
 import { LazyReferenceScanner, type LazyRefRoot } from "./index/lazyRefs";
 import { ModOriginResolver } from "./index/modOrigin";
 import { loadSchema, type SchemaData } from "./schema/loader";
-import { VARIABLE_KINDS } from "./schema/ck3Schema";
-import type { Ck3SchemaEntry } from "./schema/types";
+import { VARIABLE_KINDS } from "./games/jomini/variables";
+import { activeProfile, setActiveProfile } from "./games/active";
+import { resolveProfile } from "./games/registry";
+import type { SchemaEntry } from "./schema/types";
 import { URI } from "vscode-uri";
 import { ServerData } from "./serverData";
 import { CompletionFeature } from "./features/completion";
@@ -125,7 +128,7 @@ import { wordRangeAt } from "./wordAt";
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 
-let settings: Ck3Settings = {
+let settings: ParadoxSettings = {
   gamePath: null,
   logsPath: null,
   modPath: null,
@@ -185,9 +188,9 @@ function focusFilter(modRoot: string | null | undefined): (file: string) => bool
  * sites stay out of the reference index (memory guard for AGOT-sized mods). */
 const isEngineToken = (name: string) => data.tokenMap.has(name);
 
-/** Ordered parent-mod roots: settings (ck3.parentMods / workspace folders)
- * merged with every workspace mod's .ck3modding/playset.json, minus mod/game
- * roots. */
+/** Ordered parent-mod roots: settings (parent-mods setting / workspace
+ * folders) merged with every workspace mod's <configDir>/playset.json, minus
+ * mod/game roots. */
 function parentRoots(): string[] {
   const roots: string[] = [];
   const seen = new Set<string>();
@@ -246,7 +249,7 @@ function workspaceModRoots(): string[] {
 
 /** The workspace mod root a file lives under, or null. Every workspace mod is
  * a first-class editable mod (source "mod"); there is no primary-mod special
- * case — dependency parents (ck3.parentMods / playset) stay "parent". */
+ * case — dependency parents (parent-mods setting / playset) stay "parent". */
 function workspaceRootOf(fsPath: string): string | null {
   const lower = fsPath.toLowerCase();
   if (settings.modPath && lower.startsWith(settings.modPath.toLowerCase())) return settings.modPath;
@@ -254,7 +257,7 @@ function workspaceRootOf(fsPath: string): string | null {
 }
 
 /** Schema entry for the folder a file lives in (structure/ambient/root-scope seed). */
-function schemaEntryForFile(fsPath: string): Ck3SchemaEntry | null {
+function schemaEntryForFile(fsPath: string): SchemaEntry | null {
   const lower = fsPath.toLowerCase();
   for (const root of contentRoots()) {
     if (lower.startsWith(root.toLowerCase())) return classifyFile(root, fsPath, schema.entries);
@@ -281,7 +284,7 @@ function log(msg: string): void {
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 function sendStatus(): void {
-  const payload: Ck3StatusPayload = {
+  const payload: StatusPayload = {
     tokens: data.tokens.length,
     tokensFromScriptDocs,
     definitions: data.index.stats().total,
@@ -309,7 +312,7 @@ function loadDocs(force: boolean): void {
   let modifierTemplates = [] as ReturnType<typeof loadTokenData>["templates"];
   if (settings.logsPath) {
     const t0 = Date.now();
-    const docsCacheFile = path.join(storageDir, "docsCache.json");
+    const docsCacheFile = path.join(storageDir, `docsCache${activeProfile().cacheSuffix}.json`);
     const result = loadTokenData(settings.logsPath, docsCacheFile, force);
     scriptTokens = result.tokens;
     modifierTemplates = result.templates;
@@ -352,7 +355,7 @@ function loadDocs(force: boolean): void {
   }
 
   const t2 = Date.now();
-  const usageCache = storageDir ? path.join(storageDir, "dataFnUsage.json") : null;
+  const usageCache = storageDir ? path.join(storageDir, `dataFnUsage${activeProfile().cacheSuffix}.json`) : null;
   const generation = ++usageGeneration;
   void loadDataFnUsageAsync(settings.gamePath, settings.locLanguage, usageCache, force)
     .then((result) => {
@@ -501,9 +504,9 @@ function rebuildModNamespaces(): void {
   }
 }
 
-/** Ordered parent-mod roots from <mod>/.ck3modding/playset.json, if present. */
+/** Ordered parent-mod roots from <mod>/<configDir>/playset.json, if present. */
 function readPlayset(modPath: string): string[] {
-  const file = path.join(modPath, ".ck3modding", "playset.json");
+  const file = path.join(modPath, activeProfile().configDirName, "playset.json");
   try {
     if (!fs.existsSync(file)) return [];
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -557,7 +560,7 @@ async function buildIndex(): Promise<void> {
       const t1 = Date.now();
       // Workspace mods are edited mods like any other: source "mod" (full
       // reference indexing, views, ranking). Only dependency parents from
-      // ck3.parentMods / playset.json are read-only "parent" context.
+      // the parent-mods setting / playset.json are read-only "parent" context.
       const isWorkspaceMod = wsMods.has(parent.toLowerCase());
       const parentDefs = await scanRootChunked(parent, isWorkspaceMod ? "mod" : "parent", generation);
       if (parentDefs === null) return;
@@ -576,14 +579,17 @@ async function buildIndex(): Promise<void> {
       const gamePath = settings.gamePath;
       const t0 = Date.now();
       const version = detectGameVersion(gamePath);
-      const cacheFile = path.join(storageDir, `vanillaIndex-${settings.locLanguage}.json`);
+      const cacheFile = path.join(
+        storageDir,
+        `vanillaIndex${activeProfile().cacheSuffix}-${settings.locLanguage}.json`
+      );
       let defs = loadIndexCache(cacheFile, version);
       if (defs) {
         log(`loaded vanilla index from cache: ${defs.length} definitions, game ${version} (${Date.now() - t0}ms)`);
       } else {
         log(`indexing vanilla (game ${version})...`);
         const progress = await connection.window.createWorkDoneProgress();
-        progress.begin("CK3: indexing vanilla", 0, "scanning...", false);
+        progress.begin(`${activeProfile().shortName}: indexing vanilla`, 0, "scanning...", false);
         try {
           // Engine layer first so game definitions come later (game shadows
           // jomini, matching load order). Cached together with vanilla.
@@ -663,20 +669,21 @@ function rescanModFile(fsPath: string): void {
 // ---- lifecycle ---------------------------------------------------------------
 
 connection.onInitialize((params: InitializeParams): InitializeResult => {
-  const init = (params.initializationOptions ?? {}) as Partial<Ck3InitOptions>;
+  const init = (params.initializationOptions ?? {}) as Partial<ParadoxInitOptions>;
   storageDir = init.storageDir ?? "";
   wikidocsDir = init.wikidocsDir ?? "";
   if (init.settings) settings = init.settings;
+  setActiveProfile(resolveProfile(settings.gameId));
 
   // Bare-client fallbacks: the VSCode client sends fully resolved paths; a
   // plain LSP client (neovim over --stdio) may send partial settings or none.
   if (!wikidocsDir) {
-    // dist/server.js sits next to data/ck3/ in the repo checkout, the .vsix
-    // and the release tarball alike.
-    const bundled = path.resolve(__dirname, "..", "data", "ck3", "wikidocs");
+    // dist/server.js sits next to data/<game>/ in the repo checkout, the
+    // .vsix and the release tarball alike.
+    const bundled = path.resolve(__dirname, "..", "data", activeProfile().id, "wikidocs");
     if (fs.existsSync(bundled)) wikidocsDir = bundled;
   }
-  // freqs.json ships next to wikidocs/ (both under data/ck3/); derive it from
+  // freqs.json ships next to wikidocs/ (both under data/<game>/); derive it from
   // wikidocsDir so no new client-side wiring is needed. Fail-soft if empty.
   freqsDir = wikidocsDir ? path.dirname(wikidocsDir) : "";
   if (!storageDir) {
@@ -730,8 +737,11 @@ connection.onInitialized(() => {
 
 // ---- custom protocol ----------------------------------------------------------
 
-connection.onNotification(configChangedNotification, (newSettings: Ck3Settings) => {
+connection.onNotification(configChangedNotification, (newSettings: ParadoxSettings) => {
+  const gameChanged = resolveProfile(newSettings.gameId) !== activeProfile();
+  if (gameChanged) setActiveProfile(resolveProfile(newSettings.gameId));
   const pathsChanged =
+    gameChanged ||
     newSettings.gamePath !== settings.gamePath ||
     newSettings.logsPath !== settings.logsPath ||
     newSettings.modPath !== settings.modPath ||

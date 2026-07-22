@@ -1,5 +1,5 @@
 /**
- * CK3Doc doc comments (§E). A contiguous `#` comment block immediately above a
+ * PdxDoc doc comments (§E). A contiguous `#` comment block immediately above a
  * definition (no blank line between) documents it. Plain lines are prose;
  * `@tag` lines are structured.
  *

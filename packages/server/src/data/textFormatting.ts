@@ -8,7 +8,7 @@
  * wins, and `override = no` (the base set's default) confirms that; a later
  * definition only replaces it with `override = yes`. So the jomini base `G`
  * (green, override=no) is NOT clobbered by game's `G` (which sets no override) —
- * matching the engine and the CK3 modding convention (a mod overrides a base
+ * matching the engine and the Paradox modding convention (a mod overrides a base
  * format with `override = yes`). Callers must addLayer in load order.
  *
  * Aliases chain (`I` → `instruction` → `G;italic` → G's color); the resolved

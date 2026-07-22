@@ -1,5 +1,5 @@
 /**
- * ck3/eventDetail: everything the graph inspector shows about one event —
+ * paradox/eventDetail: everything the graph inspector shows about one event —
  * localized title/desc/options (with their editable loc sites), section
  * summaries, and every referenced saved scope / variable / scripted
  * effect/trigger / script value / chained event WITH its definition site so

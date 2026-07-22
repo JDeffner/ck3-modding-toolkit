@@ -15,7 +15,7 @@
  * No `vscode` imports: unit-tested in plain Node.
  */
 import type { Definition, Reference } from "@paradox-lsp/protocol/types";
-import type { Ck3SchemaEntry } from "../schema/types";
+import type { SchemaEntry } from "../schema/types";
 import type { ServerData } from "../serverData";
 import { resolveKeyChainScopes, type InferenceContext } from "./inference";
 import type { Scope, ScopeModel } from "./model";
@@ -59,7 +59,7 @@ interface Cache {
 const cache = new WeakMap<ServerData, Cache>();
 
 /**
- * CK3Doc `@scope` tag of a definition (`# @scope character` above a scripted
+ * PdxDoc `@scope` tag of a definition (`# @scope character` above a scripted
  * effect/trigger/value): the calling scope the author declared. Null when the
  * definition carries no tag.
  */
@@ -84,7 +84,7 @@ export function defScopeTag(data: ServerData, name: string): Set<Scope> | null {
  * divergent contexts would make hover/completion results depend on which
  * request happened to arrive first.
  */
-export function inferenceContextFor(data: ServerData, entry: Ck3SchemaEntry | null): InferenceContext {
+export function inferenceContextFor(data: ServerData, entry: SchemaEntry | null): InferenceContext {
   const varInfo = variableTypes(data, data.rootScopesForFile);
   return {
     entry,
@@ -108,7 +108,7 @@ const callSiteCache = new WeakMap<ServerData, CallSiteCache>();
 /**
  * Calling scopes of scripted effects/triggers/modifiers aggregated from their
  * indexed call sites (rebuilt when either index changes). The root-scope
- * fallback for definitions without a CK3Doc `@scope` tag.
+ * fallback for definitions without a PdxDoc `@scope` tag.
  */
 export function callSiteScopes(
   data: ServerData,

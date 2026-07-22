@@ -11,8 +11,9 @@ import { MarkupKind, type Hover, type Position } from "vscode-languageserver/nod
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import * as path from "path";
 import { URI } from "vscode-uri";
-import type { Ck3SchemaEntry } from "../schema/types";
+import type { SchemaEntry } from "../schema/types";
 import type { TokenData } from "@paradox-lsp/protocol/types";
+import { clientCommands } from "@paradox-lsp/protocol/protocol";
 import type { ServerData } from "../serverData";
 import type { SchemaData } from "../schema/loader";
 import { scopePrefixBefore, wordRangeAt } from "../wordAt";
@@ -23,7 +24,8 @@ import { inferScopeAt } from "../scopes/inference";
 import { inferenceContextFor, variableTypes } from "../scopes/varTypes";
 import { nodeAtOffset, walkStatements } from "../parser";
 import type { RefField } from "../schema/types";
-import { BLOCK_REF_FIELDS, VAR_PREFIX_KINDS } from "../schema/ck3Schema";
+import { VAR_PREFIX_KINDS } from "../games/jomini/variables";
+import { activeProfile } from "../games/active";
 import { KEYWORD_DOCS, scopeWordDoc } from "../data/keywordDocs";
 import { matchTemplatedModifier, templatedModifierDoc } from "../data/modifierTemplates";
 import type { Scope } from "../scopes/model";
@@ -44,7 +46,7 @@ export function provideHover(
   document: TextDocument,
   position: Position,
   rootScopes: Set<Scope> | null,
-  entry: Ck3SchemaEntry | null = null,
+  entry: SchemaEntry | null = null,
   getSchema?: () => SchemaData
 ): Hover | null {
   const lineText = getLineText(document, position.line);
@@ -303,7 +305,7 @@ function definitionCard(
     const label = `${refs.toLocaleString("en-US")} reference${refs === 1 ? "" : "s"}`;
     footer.push(
       at
-        ? `[${label}](command:ck3.showReferences?${encodeURIComponent(
+        ? `[${label}](command:${clientCommands.showReferences}?${encodeURIComponent(
             JSON.stringify([at.uri, at.line, at.character])
           )} "Show all references")`
         : label
@@ -323,7 +325,7 @@ function provenance(def: { file: string; line: number }): string {
 }
 
 /**
- * Doc-comment / example extraction (§D2 mock 2, §E3). Reads the CK3Doc fields
+ * Doc-comment / example extraction (§D2 mock 2, §E3). Reads the PdxDoc fields
  * captured at index time (`Definition.doc`/`.tags`) and renders prose + tags.
  * Fail-soft: an undocumented definition yields an empty body.
  */
@@ -337,7 +339,7 @@ function savedScopeCard(
   document: TextDocument,
   name: string,
   rootScopes: Set<Scope> | null,
-  entry: Ck3SchemaEntry | null
+  entry: SchemaEntry | null
 ): string {
   const ambient = entry?.ambientScopes?.find((a) => a.name === name);
   const ictx = inferenceContextFor(data, entry);
@@ -403,7 +405,7 @@ function structureKeyCard(
   document: TextDocument,
   position: Position,
   word: string,
-  entry: Ck3SchemaEntry,
+  entry: SchemaEntry,
   getSchema: () => SchemaData
 ): string | null {
   const { result, lineIndex } = getParse(document);
@@ -429,7 +431,7 @@ function enumValueCard(
   document: TextDocument,
   position: Position,
   word: string,
-  entry: Ck3SchemaEntry,
+  entry: SchemaEntry,
   getSchema: () => SchemaData
 ): string | null {
   const { result, lineIndex } = getParse(document);
@@ -645,7 +647,7 @@ function refKindsAt(
     // `override_background = { reference = X }`).
     const enclosing = hit.path[hit.path.length - 2];
     if (enclosing?.kind === "assignment" && !enclosing.key.quoted) {
-      return BLOCK_REF_FIELDS[enclosing.key.text.toLowerCase()]?.[last.key.text] ?? null;
+      return activeProfile().blockRefFields[enclosing.key.text.toLowerCase()]?.[last.key.text] ?? null;
     }
     return null;
   }
@@ -667,7 +669,7 @@ function currentScopes(
   document: TextDocument,
   position: Position,
   rootScopes: Set<Scope> | null,
-  entry: Ck3SchemaEntry | null
+  entry: SchemaEntry | null
 ): Set<string> | null {
   const inference = scopeInference(data, document, position, rootScopes, entry);
   return inference.scopes && inference.scopes.size > 0 ? inference.scopes : null;
@@ -678,7 +680,7 @@ function scopeInference(
   document: TextDocument,
   position: Position,
   rootScopes: Set<Scope> | null,
-  entry: Ck3SchemaEntry | null
+  entry: SchemaEntry | null
 ): ReturnType<typeof inferScopeAt> {
   const { result, lineIndex } = getParse(document);
   const offset = lineIndex.offsetAt(position);

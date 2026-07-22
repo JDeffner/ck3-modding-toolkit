@@ -48,13 +48,13 @@ export interface Definition {
   container?: string;
   /** For scripted effects/triggers: $PARAM$ names in declaration order (signature help). */
   params?: string[];
-  /** CK3Doc prose from a leading `#` comment block (§E); capped for memory. */
+  /** PdxDoc prose from a leading `#` comment block (§E); capped for memory. */
   doc?: string;
-  /** CK3Doc structured tags (@scope, @param, @saves, @returns, @example, @deprecated, …). */
+  /** PdxDoc structured tags (@scope, @param, @saves, @returns, @example, @deprecated, …). */
   tags?: DocTag[];
 }
 
-/** One structured CK3Doc tag line (§E1). Unknown tags render as prose, not stored here. */
+/** One structured PdxDoc tag line (§E1). Unknown tags render as prose, not stored here. */
 export interface DocTag {
   /** Tag name without the leading `@` (lowercased). */
   tag: string;

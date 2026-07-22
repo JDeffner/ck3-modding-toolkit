@@ -1,5 +1,5 @@
 /**
- * ck3/locCoverage: per-language localization health for the mod —
+ * paradox/locCoverage: per-language localization health for the mod —
  * referenced-but-missing keys, defined-but-orphaned keys, and untranslated
  * keys (value identical to the source language). Feeds the coverage tree and
  * the translation workflow.
@@ -7,7 +7,7 @@
 import * as path from "path";
 import * as fs from "fs";
 import type { LocCoverage, LocIssue } from "@paradox-lsp/protocol/protocol";
-import type { Ck3SchemaEntry } from "../schema/types";
+import type { SchemaEntry } from "../schema/types";
 import { listFiles } from "@paradox-lsp/protocol/fsWalk";
 import { detectLocFileLanguage } from "@paradox-lsp/protocol/translationCore";
 import { parseLoc } from "../parser";
@@ -48,7 +48,7 @@ export function computeLocCoverage(
   data: ServerData,
   modPath: string | null,
   sourceLanguage: string,
-  schemaEntries: Ck3SchemaEntry[],
+  schemaEntries: SchemaEntry[],
   inFocus: (file: string) => boolean = () => true
 ): LocCoverage[] {
   if (!modPath) return [];

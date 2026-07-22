@@ -3,7 +3,7 @@
  * in .gui and localization files. Three knowledge layers, best-first:
  *
  *  - the user's DumpDataTypes output (version-exact names, args, returns);
- *  - the bundled wiki baseline (packages/server/data/ck3/dataTypes.json);
+ *  - the bundled wiki baseline (packages/server/data/<game>/dataTypes.json);
  *  - vanilla usage harvested from the user's own game files (dataFnUsage.ts):
  *    names newer than both tables, usage counts for ranking, observed literal
  *    arguments, formatting suffixes, and real example sites.

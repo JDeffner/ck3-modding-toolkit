@@ -24,10 +24,10 @@ import { loadWikiTokens } from "../src/data/wikiDocs";
 import { loadFreqs } from "../src/schema/freqs";
 import { classifyFile, DefinitionIndex, scanRoot } from "../src/index/indexer";
 import { extractReferences } from "../src/index/references";
-import { CK3_SCHEMA } from "../src/schema/ck3Schema";
+import { CK3_SCHEMA } from "../src/games/ck3/schema";
 import { walkStatements, parseScript, decode, type Statement } from "../src/parser";
 import { classifyKeyword } from "../src/contextKeywords";
-import type { Ck3SchemaEntry } from "../src/schema/types";
+import type { SchemaEntry } from "../src/schema/types";
 
 /** The completion contexts we sample and report separately. */
 export type EvalContext =
@@ -329,7 +329,7 @@ export function runRankEval(
 function evalOne(
   env: EvalEnv,
   file: string,
-  entry: Ck3SchemaEntry | null,
+  entry: SchemaEntry | null,
   text: string,
   cand: Candidate
 ): EvalSample | null {

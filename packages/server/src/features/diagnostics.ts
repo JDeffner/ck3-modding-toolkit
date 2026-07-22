@@ -1,18 +1,18 @@
 /**
- * Structural diagnostics (source "ck3-script"): the silent-failure class that
- * makes the game ignore content with zero error output. Everything here is
- * *certain* — semantic validation stays ck3-tiger's job (rework plan AD-5/6).
+ * Structural diagnostics: the silent-failure class that makes the game ignore
+ * content with zero error output. Everything here is *certain* — semantic
+ * validation stays the tiger validator's job (rework plan AD-5/6).
  *
  * Each diagnostic carries a stable code; docs/diagnostics/<code>.md explains
- * the in-game consequence.
+ * the in-game consequence. The `source` label and game-name prose come from
+ * the active profile.
  */
 import { DiagnosticSeverity, type Diagnostic } from "vscode-languageserver/node";
 import type { LineIndex, LocParseResult, ParseResult, Range } from "../parser";
 import type { Definition, Reference } from "@paradox-lsp/protocol/types";
-import type { Ck3SchemaEntry } from "../schema/types";
+import type { SchemaEntry } from "../schema/types";
 import type { ServerData } from "../serverData";
-
-export const DIAGNOSTIC_SOURCE = "ck3-script";
+import { activeProfile } from "../games/active";
 
 export interface FileContext {
   /** Absolute path of the file on disk. */
@@ -46,7 +46,7 @@ function diag(
   code: string,
   message: string
 ): Diagnostic {
-  return { range, severity, code, message, source: DIAGNOSTIC_SOURCE };
+  return { range, severity, code, message, source: activeProfile().diagnosticSource };
 }
 
 function toRange(lines: LineIndex, range: Range) {
@@ -64,29 +64,33 @@ const SCRIPT_ERROR_SEVERITY: Record<string, DiagnosticSeverity> = {
   "missing-value": DiagnosticSeverity.Warning,
 };
 
-const SCRIPT_ERROR_HINT: Record<string, string> = {
-  "unclosed-brace": " CK3 silently ignores everything in the file after an unbalanced brace.",
-  "stray-close": " CK3 may misread the rest of the file.",
-};
+function scriptErrorHint(code: string): string {
+  const game = activeProfile().shortName;
+  if (code === "unclosed-brace") return ` ${game} silently ignores everything in the file after an unbalanced brace.`;
+  if (code === "stray-close") return ` ${game} may misread the rest of the file.`;
+  return "";
+}
 
 export function computeScriptDiagnostics(parse: ParseResult, lines: LineIndex, ctx: FileContext): Diagnostic[] {
   const out: Diagnostic[] = [];
 
   for (const err of parse.errors) {
     const severity = SCRIPT_ERROR_SEVERITY[err.code] ?? DiagnosticSeverity.Warning;
-    const hint = SCRIPT_ERROR_HINT[err.code] ?? "";
-    out.push(diag(toRange(lines, err.range), severity, err.code, err.message + hint));
+    out.push(diag(toRange(lines, err.range), severity, err.code, err.message + scriptErrorHint(err.code)));
   }
 
   const rel = modRelPath(ctx);
   if (rel) {
-    if (rel.startsWith("common/on_actions/")) {
+    // Only games whose schema reads common/on_action (singular) get the
+    // plural-folder trap check (in other games the plural IS the real folder).
+    const singular = activeProfile().schema.some((e) => e.path === "common/on_action");
+    if (singular && rel.startsWith("common/on_actions/")) {
       out.push(
         diag(
           TOP_OF_FILE,
           DiagnosticSeverity.Error,
           "wrong-on-action-folder",
-          "This file is under common/on_actions/ — CK3 reads common/on_action/ (singular). The game silently ignores this file."
+          `This file is under common/on_actions/ — ${activeProfile().shortName} reads common/on_action/ (singular). The game silently ignores this file.`
         )
       );
     }
@@ -128,7 +132,7 @@ export function computeReferenceDiagnostics(references: Reference[], data: Serve
 /** Schema-declared required localization keys missing for mod definitions. */
 export function computeRequiredLocDiagnostics(
   defs: Definition[],
-  entry: Ck3SchemaEntry,
+  entry: SchemaEntry,
   data: ServerData
 ): Diagnostic[] {
   const patterns = entry.requiredLoc ?? [];
@@ -162,10 +166,11 @@ const LOC_ERROR_SEVERITY: Record<string, DiagnosticSeverity> = {
   "content-before-header": DiagnosticSeverity.Warning,
 };
 
-const LOC_ERROR_HINT: Record<string, string> = {
-  "no-header": " Without an l_<language>: header the game loads none of these entries.",
-  "tab-indent": " CK3 rejects tab indentation in localization files.",
-};
+function locErrorHint(code: string): string {
+  if (code === "no-header") return " Without an l_<language>: header the game loads none of these entries.";
+  if (code === "tab-indent") return ` ${activeProfile().shortName} rejects tab indentation in localization files.`;
+  return "";
+}
 
 const FILENAME_LANG = /_l_([a-z_]+)\.ya?ml$/i;
 
@@ -174,8 +179,7 @@ export function computeLocDiagnostics(loc: LocParseResult, lines: LineIndex, ctx
 
   for (const err of loc.errors) {
     const severity = LOC_ERROR_SEVERITY[err.code] ?? DiagnosticSeverity.Warning;
-    const hint = LOC_ERROR_HINT[err.code] ?? "";
-    out.push(diag(toRange(lines, err.range), severity, `loc-${err.code}`, err.message + hint));
+    out.push(diag(toRange(lines, err.range), severity, `loc-${err.code}`, err.message + locErrorHint(err.code)));
   }
 
   // BOM is checked against the bytes on disk (editors strip it from the buffer text).
@@ -185,7 +189,7 @@ export function computeLocDiagnostics(loc: LocParseResult, lines: LineIndex, ctx
         TOP_OF_FILE,
         DiagnosticSeverity.Error,
         "missing-bom",
-        "This localization file has no UTF-8 BOM. CK3 requires UTF-8 with BOM; without it the game ignores the file. Save with encoding \"UTF-8 with BOM\"."
+        `This localization file has no UTF-8 BOM. ${activeProfile().shortName} requires UTF-8 with BOM; without it the game ignores the file. Save with encoding "UTF-8 with BOM".`
       )
     );
   }
@@ -222,7 +226,7 @@ export function computeLocDiagnostics(loc: LocParseResult, lines: LineIndex, ctx
           TOP_OF_FILE,
           DiagnosticSeverity.Error,
           "wrong-localization-folder",
-          "This folder is localisation/ (British spelling) — CK3 reads localization/. The game silently ignores this file."
+          `This folder is localisation/ (British spelling) — ${activeProfile().shortName} reads localization/. The game silently ignores this file.`
         )
       );
     }

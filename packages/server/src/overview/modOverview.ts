@@ -1,5 +1,5 @@
 /**
- * ck3/modOverview: the mod's content inventory by kind, for the Mod Overview
+ * paradox/modOverview: the mod's content inventory by kind, for the Mod Overview
  * tree. Definition lists are capped per kind; counts stay exact.
  */
 import type { ModOverview, OverviewKind } from "@paradox-lsp/protocol/protocol";

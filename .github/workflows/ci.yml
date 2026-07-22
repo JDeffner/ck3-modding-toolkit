@@ -19,6 +19,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
+      - name: Game boundary (no game strings outside games/ and vscode/)
+        run: node scripts/check-game-boundary.mjs
       - run: pnpm test
       - run: pnpm run compile
       - name: Package (vsix)

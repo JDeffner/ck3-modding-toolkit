@@ -14,7 +14,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { CK3_SCHEMA } from "../packages/server/src/schema/ck3Schema";
+import { CK3_SCHEMA } from "../packages/server/src/games/ck3/schema";
 import { parseScript } from "../packages/server/src/parser";
 import structuresJson from "../packages/server/data/ck3/structures.json";
 import { requireDevPath } from "./devPaths";

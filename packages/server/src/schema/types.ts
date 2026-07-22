@@ -1,12 +1,12 @@
 /**
- * The CK3 type schema (rework plan AD-3): a *small*, declarative,
+ * The game type schema (rework plan AD-3): a *small*, declarative,
  * community-editable table describing what lives in each game folder — how
  * definitions are named, which loc keys a type requires, what scope its
  * script blocks run in, and which assignment keys cross-reference other
  * definitions.
  *
  * This is deliberately NOT a validation-rule language (that was CWTools'
- * mistake); deep semantic validation is ck3-tiger's job. The schema feeds
+ * mistake); deep semantic validation is the tiger validator's job. The schema feeds
  * navigation, completion, hover, references, rename, coverage and (very
  * conservative) structural diagnostics.
  */
@@ -64,7 +64,7 @@ export interface AmbientScope {
   doc: string;
 }
 
-export interface Ck3SchemaEntry {
+export interface SchemaEntry {
   /** Folder relative to the game/mod root, forward slashes, no trailing slash. */
   path: string;
   /** Definition kind, singular snake_case (e.g. "trait", "decision"). */
@@ -110,9 +110,9 @@ export interface RefField {
   form?: RefFieldForm; // default "scalar"
 }
 
-/** JSON shape of the optional workspace overlay at .ck3modding/schema.json. */
+/** JSON shape of the optional workspace overlay at <configDir>/schema.json. */
 export interface SchemaOverlay {
-  entries?: Ck3SchemaEntry[];
+  entries?: SchemaEntry[];
   refFields?: RefField[];
   prefixRefs?: Record<string, string[]>;
 }

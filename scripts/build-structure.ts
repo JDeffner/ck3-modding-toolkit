@@ -6,7 +6,7 @@
  * the game ships (leading `#` comment block and/or trailing inline comment).
  *
  * The OUTPUT IS NOT SHIPPED. It is a first pass for a human to check and curate
- * into packages/server/src/schema/structures.ts — the shipped data must be static
+ * into packages/server/src/games/ck3/structures.ts — the shipped data must be static
  * TypeScript, because users may not have gamePath set. Regenerate per patch.
  *
  * Run: npx esbuild scripts/build-structure.ts --bundle --platform=node \

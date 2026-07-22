@@ -10,14 +10,14 @@ import type { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
 import * as path from "path";
 import type { ServerData } from "../serverData";
-import type { Ck3Settings } from "@paradox-lsp/protocol/protocol";
+import type { ParadoxSettings } from "@paradox-lsp/protocol/protocol";
 import { findLocKeyRefs, locKeyOnLine } from "@paradox-lsp/protocol/locRefs";
 import { detectLocFileLanguage } from "@paradox-lsp/protocol/translationCore";
 import { getLineText } from "../documents";
 import { getParse, getSavedScopes } from "../parseCache";
 import { inferScopeAt } from "../scopes/inference";
 import { inferenceContextFor } from "../scopes/varTypes";
-import type { Ck3SchemaEntry } from "../schema/types";
+import type { SchemaEntry } from "../schema/types";
 import type { Scope } from "../scopes/model";
 import { walkStatements } from "../parser";
 
@@ -29,11 +29,11 @@ function truncate(text: string, max: number): string {
 
 export function provideInlayHints(
   data: ServerData,
-  settings: Ck3Settings,
+  settings: ParadoxSettings,
   document: TextDocument,
   range: Range,
   rootScopes: Set<Scope> | null,
-  entry: Ck3SchemaEntry | null
+  entry: SchemaEntry | null
 ): InlayHint[] {
   if (document.languageId === "paradox-loc") return translationOverlayHints(data, settings, document, range);
   const hints = locPreviewHints(data, document, range);
@@ -47,7 +47,7 @@ function scopeHints(
   document: TextDocument,
   range: Range,
   rootScopes: Set<Scope> | null,
-  entry: Ck3SchemaEntry | null
+  entry: SchemaEntry | null
 ): InlayHint[] {
   const { result, lineIndex } = getParse(document);
   const ictx = inferenceContextFor(data, entry);
@@ -107,7 +107,7 @@ function locPreviewHints(data: ServerData, document: TextDocument, range: Range)
 /** Translated loc files: overlay the reference-language text per entry. */
 function translationOverlayHints(
   data: ServerData,
-  settings: Ck3Settings,
+  settings: ParadoxSettings,
   document: TextDocument,
   range: Range
 ): InlayHint[] {

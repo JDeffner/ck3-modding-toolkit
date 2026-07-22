@@ -3,7 +3,7 @@
  * snippets (spliced via `using = Name`) and `types Group { type name = base
  * {...} }` widget classes, collected across files with the gui/ override
  * rule: FIOS, the FIRST definition wins (opposite of script's LIOS; see
- * AGENTS.md and references/gui.md in the ck3-modding skill).
+ * AGENTS.md).
  *
  * The layout engine consumes this store to expand instances; collection is
  * separate so callers control the file set and order (vanilla + mod).

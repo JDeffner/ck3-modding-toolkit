@@ -1,7 +1,8 @@
 /**
- * Custom LSP protocol between the CK3 client and server: method names and
- * payload shapes. Everything crossing the process boundary is declared here so
- * both sides compile against one source of truth.
+ * Custom LSP protocol between client and server: method names and payload
+ * shapes. Everything crossing the process boundary is declared here so both
+ * sides compile against one source of truth. docs/PROTOCOL.md documents the
+ * contract for non-VSCode clients; treat changes here as API changes.
  *
  * No `vscode` / `vscode-languageserver` imports: plain wire types only.
  */
@@ -9,7 +10,10 @@ import type { IndexStats } from "./types";
 
 /** Resolved extension settings, computed client-side (path validation, Steam
  * detection fallbacks, workspace-folder default) and pushed to the server. */
-export interface Ck3Settings {
+export interface ParadoxSettings {
+  /** Game profile id; absent/unknown ids fall back to the server's default
+   * game. Detected client-side per workspace (descriptor file, else setting). */
+  gameId?: string;
   gamePath: string | null;
   logsPath: string | null;
   modPath: string | null;
@@ -32,28 +36,42 @@ export interface Ck3Settings {
 }
 
 /** initializationOptions passed at LanguageClient start. */
-export interface Ck3InitOptions {
+export interface ParadoxInitOptions {
   /** Server-side cache directory (the extension's global storage path). */
   storageDir: string;
   /** Absolute path of the bundled wikidocs/ folder. */
   wikidocsDir: string;
-  settings: Ck3Settings;
+  settings: ParadoxSettings;
 }
+
+// ---- client command ids ----------------------------------------------------
+
+/**
+ * VSCode client commands the server references in code actions and hover
+ * links (part of the wire contract: the client must register exactly these).
+ * The legacy "ck3." prefix is kept on purpose — they are public extension
+ * command ids with shipped default keybindings.
+ */
+export const clientCommands = {
+  editLocalization: "ck3.editLocalization",
+  openLocalizationSideBySide: "ck3.openLocalizationSideBySide",
+  showReferences: "ck3.showReferences",
+} as const;
 
 // ---- client -> server ------------------------------------------------------
 
-/** Notification: settings changed; payload {@link Ck3Settings}. */
-export const configChangedNotification = "ck3/configChanged";
+/** Notification: settings changed; payload {@link ParadoxSettings}. */
+export const configChangedNotification = "paradox/configChanged";
 
 /** Notification: a mod file changed on disk; payload {@link ModFileChangeParams}. */
-export const modFileChangedNotification = "ck3/modFileChanged";
+export const modFileChangedNotification = "paradox/modFileChanged";
 export interface ModFileChangeParams {
   /** Absolute filesystem path (not a URI). */
   fsPath: string;
 }
 
 /** Request: re-parse script_docs logs; payload {@link ReloadDocsParams} -> {@link ReloadDocsResult}. */
-export const reloadDocsRequest = "ck3/reloadDocs";
+export const reloadDocsRequest = "paradox/reloadDocs";
 export interface ReloadDocsParams {
   force: boolean;
 }
@@ -62,11 +80,11 @@ export interface ReloadDocsResult {
 }
 
 /** Request: index statistics; no payload -> {@link IndexStats}. */
-export const indexStatsRequest = "ck3/indexStats";
+export const indexStatsRequest = "paradox/indexStats";
 
 /** Request: look up localization entries for a key; {@link LookupLocParams} -> {@link LocEntryInfo}[].
  * Mod entries shadow vanilla ones (the full list is returned, mod first). */
-export const lookupLocRequest = "ck3/lookupLoc";
+export const lookupLocRequest = "paradox/lookupLoc";
 export interface LookupLocParams {
   key: string;
 }
@@ -80,9 +98,9 @@ export interface LocEntryInfo {
 
 // ---- server -> client ------------------------------------------------------
 
-/** Notification: data health for the status bar; payload {@link Ck3StatusPayload}. */
-export const statusNotification = "ck3/status";
-export interface Ck3StatusPayload {
+/** Notification: data health for the status bar; payload {@link StatusPayload}. */
+export const statusNotification = "paradox/status";
+export interface StatusPayload {
   tokens: number;
   tokensFromScriptDocs: boolean;
   definitions: number;
@@ -92,7 +110,7 @@ export interface Ck3StatusPayload {
 
 /** Notification: the definition index changed (debounced server-side); no payload.
  * Overview views re-query on this signal. */
-export const indexChangedNotification = "ck3/indexChanged";
+export const indexChangedNotification = "paradox/indexChanged";
 
 // ---- overview suite (Phase 4) ------------------------------------------------
 
@@ -103,7 +121,7 @@ export interface ModScopedParams {
 }
 
 /** Request: mod content inventory; {@link ModScopedParams} -> {@link ModOverview}. */
-export const modOverviewRequest = "ck3/modOverview";
+export const modOverviewRequest = "paradox/modOverview";
 export interface OverviewDef {
   name: string;
   file: string;
@@ -122,7 +140,7 @@ export interface ModOverview {
 }
 
 /** Request: localization coverage; {@link ModScopedParams} -> {@link LocCoverage}[]. */
-export const locCoverageRequest = "ck3/locCoverage";
+export const locCoverageRequest = "paradox/locCoverage";
 export interface LocIssue {
   key: string;
   file?: string;
@@ -143,7 +161,7 @@ export interface LocCoverage {
 }
 
 /** Request: override/conflict map; {@link ModScopedParams} -> {@link OverrideInfo}[]. */
-export const overridesRequest = "ck3/overrides";
+export const overridesRequest = "paradox/overrides";
 export interface OverrideSite {
   source: "vanilla" | "parent" | "mod";
   /** Display label: the owning mod's descriptor name when known, else `source`. */
@@ -163,7 +181,7 @@ export interface OverrideInfo {
 }
 
 /** Request: full event detail for the graph inspector; {@link EventDetailParams} -> {@link EventDetail} | null. */
-export const eventDetailRequest = "ck3/eventDetail";
+export const eventDetailRequest = "paradox/eventDetail";
 export interface EventDetailParams {
   id: string;
 }
@@ -218,7 +236,7 @@ export interface EventDetail {
 }
 
 /** Request: GUI widget tree for a .gui document; {@link GuiTreeParams} -> {@link GuiTree}. */
-export const guiTreeRequest = "ck3/guiTree";
+export const guiTreeRequest = "paradox/guiTree";
 export interface GuiTreeParams {
   /** For display only; the text is authoritative. */
   uri: string;
@@ -251,7 +269,7 @@ export interface GuiTree {
  * the measured layout engine (docs/gui-designer/calibration/spec.md), with
  * templates/types resolved against the vanilla + mod gui tree.
  */
-export const guiLayoutRequest = "ck3/guiLayout";
+export const guiLayoutRequest = "paradox/guiLayout";
 export interface GuiLayoutParams {
   /** For display only; the text is authoritative. */
   uri: string;
@@ -322,7 +340,7 @@ export interface GuiLayoutResult {
  * widget or property cannot be edited). The client applies the offsets via
  * WorkspaceEdit so undo and the live preview loop stay in the editor.
  */
-export const guiWidgetEditRequest = "ck3/guiWidgetEdit";
+export const guiWidgetEditRequest = "paradox/guiWidgetEdit";
 export interface GuiWidgetEditParams {
   uri: string;
   /** Authoritative document text the offsets refer to. */
@@ -341,7 +359,7 @@ export interface GuiWidgetEditResult {
 }
 
 /** Request: event graph; {@link EventGraphParams} -> {@link EventGraph}. */
-export const eventGraphRequest = "ck3/eventGraph";
+export const eventGraphRequest = "paradox/eventGraph";
 export interface EventGraphParams {
   /** Focus definition (event id / on_action name); with namespace, either works. */
   root?: string;
@@ -379,7 +397,7 @@ export interface EventGraph {
  * {@link DependenciesParams} -> {@link DependenciesResult}. Cursor-driven
  * (uri + position) or by name (optionally disambiguated by kind).
  */
-export const dependenciesRequest = "ck3/dependencies";
+export const dependenciesRequest = "paradox/dependencies";
 export interface DependenciesParams {
   /** Resolve the definition under this cursor position. */
   uri?: string;

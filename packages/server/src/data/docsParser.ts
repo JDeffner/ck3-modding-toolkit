@@ -1,5 +1,5 @@
 /**
- * Parser for the CK3 `script_docs` console command output:
+ * Parser for the Jomini `script_docs` console command output:
  * triggers.log, effects.log, event_targets.log, modifiers.log.
  *
  * The format is line-based and has shifted slightly between game patches, so parse

@@ -4,72 +4,29 @@
  * concrete modifier per definition (e.g. `french_opinion` for the culture
  * `french`). Like the generated `has_relation_X` cards in hover.ts, expansion
  * is LAZY — matched against the definition index on hover / expanded once per
- * completion cache build — never materialized into tokenMap (AGOT-scale mods
- * define thousands of cultures).
+ * completion cache build — never materialized into tokenMap (huge mods define
+ * thousands of cultures).
  *
- * Every placeholder mapping below was verified against vanilla 1.19:
- * `common/modifier_definition_formats/` enumerates the generated names, and
- * script usage (traditions, buildings, perks…) confirms the join rule is
- * `<definition name>` spliced verbatim into the template. Unverifiable
- * placeholders are deliberately absent — a wrong expansion is worse than a
- * missing one:
- *  - GEOGRAPHICAL_REGION (map_data) and TRAIT_TRACK (nested in traits) have no
- *    definition-index kind.
- *  - SUBJECT_SALARY expands to title tiers, but 40 of the 220 tier combinations
- *    do not exist in vanilla's formats.
+ * The placeholder table itself is game knowledge and lives in the game
+ * profile (games/<id>/modifierPlaceholders.ts).
  *
  * No `vscode` imports here: this module is unit-tested in plain Node.
  */
 import * as path from "path";
 import type { Definition, TokenData } from "@paradox-lsp/protocol/types";
+import { activeProfile } from "../games/active";
 
-/**
- * MEN_AT_ARMS_TYPE expands to the engine's hardcoded base types (`type = …` in
- * a men-at-arms definition), NOT to common/men_at_arms_types names: vanilla
- * uses `heavy_infantry_damage_mult`, never `armored_footmen_damage_mult`.
- */
-const MAA_BASE_TYPES = [
-  "archer_cavalry",
-  "archers",
-  "camel_cavalry",
-  "elephant_cavalry",
-  "gunpowder",
-  "heavy_cavalry",
-  "heavy_infantry",
-  "light_cavalry",
-  "nomadic_horde",
-  "pikemen",
-  "siege_weapon",
-  "skirmishers",
-] as const;
-
-interface PlaceholderSpec {
+export interface PlaceholderSpec {
   /** Definition-index kind the placeholder expands over. */
   kind?: string;
   /** Fixed engine value set, for placeholders not backed by the index. */
   values?: readonly string[];
   /** Human label for hover/completion docs ("culture", "men-at-arms base type"). */
   label: string;
+  /** Values that do NOT exist for templates with the given prefix
+   * (verified per-game exceptions to `values`). */
+  excludeValues?: Record<string, readonly string[]>;
 }
-
-const PLACEHOLDERS: Record<string, PlaceholderSpec> = {
-  CULTURE: { kind: "culture", label: "culture" }, // akan_opinion
-  // Faiths are nested under `faiths = { … }` and not indexed yet (see
-  // ck3Schema.ts); the mapping is inert until they are, which is correct.
-  FAITH: { kind: "faith", label: "faith" }, // mutazila_opinion
-  GOVERNMENT_TYPE: { kind: "government", label: "government" }, // feudal_government_opinion
-  HOLDING_TYPE: { kind: "holding_type", label: "holding type" }, // castle_holding_build_speed
-  LIFESTYLE: { kind: "lifestyle", label: "lifestyle" }, // diplomacy_lifestyle_xp_gain_add
-  MEN_AT_ARMS_TYPE: { values: MAA_BASE_TYPES, label: "men-at-arms base type" },
-  RELIGIOUS: { kind: "religion", label: "religion" }, // christianity_religion_opinion
-  RELIGIOUS_FAMILY: { kind: "religion_family", label: "religion family" }, // rf_pagan_opinion
-  SCHEME_TYPE: { kind: "scheme_type", label: "scheme type" }, // abduct_scheme_phase_duration_add
-  SCRIPTED_RELATION: { kind: "scripted_relation", label: "scripted relation" }, // scheme_phase_duration_against_rival_add
-  SITUATION_TYPE: { kind: "situation", label: "situation" }, // the_great_steppe_supply_limit_add
-  TAX_SLOT_TYPE: { kind: "tax_slot_type", label: "tax slot type" }, // clan_tax_slot_add
-  TERRAIN_TYPE: { kind: "terrain_type", label: "terrain type" }, // plains_advantage
-  VASSAL_STANCE: { kind: "vassal_stance", label: "vassal stance" }, // courtly_opinion
-};
 
 export interface ModifierTemplate {
   /** The raw templated tag, e.g. `stationed_$MEN_AT_ARMS_TYPE$_damage_add`. */
@@ -86,16 +43,16 @@ const TEMPLATE_NAME = /^([a-z0-9_]*)\$([A-Z_]+)\$([a-z0-9_]*)$/;
 
 /** Compile raw templated tokens into matchable templates; unknown placeholders are dropped. */
 export function compileModifierTemplates(raw: TokenData[]): ModifierTemplate[] {
+  const placeholders = activeProfile().modifierPlaceholders;
   const templates: ModifierTemplate[] = [];
   for (const t of raw) {
     const m = TEMPLATE_NAME.exec(t.name);
     if (!m) continue;
-    let spec = PLACEHOLDERS[m[2]];
+    let spec = placeholders[m[2]];
     if (!spec) continue;
-    // Verified exception: stationed_* variants exist for every base type
-    // EXCEPT nomadic_horde (absent from vanilla formats and script usage).
-    if (spec.values === MAA_BASE_TYPES && m[1] === "stationed_") {
-      spec = { ...spec, values: MAA_BASE_TYPES.filter((v) => v !== "nomadic_horde") };
+    const excluded = spec.values && spec.excludeValues?.[m[1]];
+    if (excluded) {
+      spec = { ...spec, values: spec.values!.filter((v) => !excluded.includes(v)) };
     }
     templates.push({ name: t.name, prefix: m[1], suffix: m[3], placeholder: m[2], spec, traits: t.traits });
   }

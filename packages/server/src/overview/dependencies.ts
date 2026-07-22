@@ -1,5 +1,5 @@
 /**
- * ck3/dependencies: a generic dependency explorer for any indexed definition.
+ * paradox/dependencies: a generic dependency explorer for any indexed definition.
  *
  * Dependents  — mod sites that reference the definition, grouped by the kind
  *   of their containing top-level definition (else by file). Schema-captured

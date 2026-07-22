@@ -18,7 +18,7 @@ import {
 import { buildCallSiteScopes, buildVariableTypes, resolveValueExpr } from "../src/scopes/varTypes";
 import { extractReferences } from "../src/index/references";
 import { loadSchema } from "../src/schema/loader";
-import type { Ck3SchemaEntry } from "../src/schema/types";
+import type { SchemaEntry } from "../src/schema/types";
 import type { Definition, TokenData } from "@paradox-lsp/protocol/types";
 
 const TOKENS: TokenData[] = [
@@ -106,24 +106,24 @@ describe("inference: data links with arguments", () => {
 
 describe("inference: per-definition root scopes", () => {
   it("event `scope = X` overrides the character default", () => {
-    const entry = { path: "events", kind: "event" } as Ck3SchemaEntry;
+    const entry = { path: "events", kind: "event" } as SchemaEntry;
     const text = "my.1 = {\n\tscope = artifact\n\timmediate = {\n\t\t|\n\t}\n}";
     expect(scopesAt(text, CHARACTER, { entry })).toEqual(["artifact"]);
   });
 
   it("events without scope= keep the character default", () => {
-    const entry = { path: "events", kind: "event" } as Ck3SchemaEntry;
+    const entry = { path: "events", kind: "event" } as SchemaEntry;
     expect(scopesAt("my.1 = {\n\timmediate = {\n\t\t|\n\t}\n}", CHARACTER, { entry })).toEqual(["character"]);
   });
 
   it("on_action roots come from on_actions.log expected scopes", () => {
-    const entry = { path: "common/on_action", kind: "on_action" } as Ck3SchemaEntry;
+    const entry = { path: "common/on_action", kind: "on_action" } as SchemaEntry;
     const ctx: InferenceContext = { entry, onActionScopes: new Map([["on_my_death", "character"]]) };
     expect(scopesAt("on_my_death = {\n\teffect = {\n\t\t|\n\t}\n}", null, ctx)).toEqual(["character"]);
   });
 
   it("scripted_effect roots come from the @scope doc tag", () => {
-    const entry = { path: "common/scripted_effects", kind: "scripted_effect" } as Ck3SchemaEntry;
+    const entry = { path: "common/scripted_effects", kind: "scripted_effect" } as SchemaEntry;
     const ctx: InferenceContext = {
       entry,
       defScopeTag: (name) => (name === "my_effect" ? new Set(["province"]) : null),
@@ -137,7 +137,7 @@ describe("inference: per-definition root scopes", () => {
       kind: "activity_type",
       rootScopes: ["character"],
       structure: { topLevel: [{ key: "is_valid", scope: "activity" }] },
-    } as Ck3SchemaEntry;
+    } as SchemaEntry;
     expect(scopesAt("act = {\n\tis_valid = {\n\t\t|\n\t}\n}", CHARACTER, { entry })).toEqual(["activity"]);
   });
 });
@@ -382,7 +382,7 @@ describe("call-site scope aggregation (scripted effects without @scope)", () => 
   });
 
   it("an untagged scripted effect roots at its aggregated calling scope", () => {
-    const entry = { path: "common/scripted_effects", kind: "scripted_effect" } as Ck3SchemaEntry;
+    const entry = { path: "common/scripted_effects", kind: "scripted_effect" } as SchemaEntry;
     const ctx: InferenceContext = {
       entry,
       callSiteScopes: new Map([["my_effect", new Set(["province"])]]),
@@ -391,7 +391,7 @@ describe("call-site scope aggregation (scripted effects without @scope)", () => 
   });
 
   it("the @scope tag wins over call-site aggregation", () => {
-    const entry = { path: "common/scripted_effects", kind: "scripted_effect" } as Ck3SchemaEntry;
+    const entry = { path: "common/scripted_effects", kind: "scripted_effect" } as SchemaEntry;
     const ctx: InferenceContext = {
       entry,
       defScopeTag: (name) => (name === "my_effect" ? new Set(["artifact"]) : null),

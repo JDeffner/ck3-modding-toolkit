@@ -10,8 +10,8 @@ import * as fs from "fs";
 import * as path from "path";
 import type { DefKind, Definition, DefSource, IndexStats } from "@paradox-lsp/protocol/types";
 import { listFiles, walkDir } from "@paradox-lsp/protocol/fsWalk";
-import { CK3_SCHEMA } from "../schema/ck3Schema";
-import type { Ck3SchemaEntry } from "../schema/types";
+import { activeProfile } from "../games/active";
+import type { SchemaEntry } from "../schema/types";
 import { EVENT_ID, extractDefinitions, extractLocDefinitions } from "./extract";
 
 export { listFiles, EVENT_ID };
@@ -27,7 +27,7 @@ export function parseScriptDefinitions(
   file: string,
   source: DefSource
 ): Definition[] {
-  const entry: Ck3SchemaEntry = {
+  const entry: SchemaEntry = {
     path: "",
     kind,
     extraction: kind === "event" ? "event-id" : "top-level-key",
@@ -139,12 +139,12 @@ export class DefinitionIndex {
 export function classifyFile(
   root: string,
   file: string,
-  entries: Ck3SchemaEntry[] = CK3_SCHEMA
-): Ck3SchemaEntry | null {
+  entries: SchemaEntry[] = activeProfile().schema
+): SchemaEntry | null {
   const rel = path.relative(root, file);
   if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
   const relFwd = rel.split(path.sep).join("/").toLowerCase();
-  let best: Ck3SchemaEntry | null = null;
+  let best: SchemaEntry | null = null;
   for (const entry of entries) {
     const ext = entry.ext ?? ".txt";
     if (relFwd.startsWith(entry.path + "/") && relFwd.endsWith(ext)) {
@@ -162,7 +162,7 @@ export function isWantedLocFile(relPath: string, locLanguage: string): boolean {
   return lower.split("/").includes(locLanguage);
 }
 
-export function parseFile(file: string, entry: Ck3SchemaEntry, source: DefSource): Definition[] {
+export function parseFile(file: string, entry: SchemaEntry, source: DefSource): Definition[] {
   let content: string;
   try {
     content = fs.readFileSync(file, "utf8");
@@ -175,13 +175,13 @@ export function parseFile(file: string, entry: Ck3SchemaEntry, source: DefSource
 
 export interface ScanOptions {
   locLanguage: string;
-  entries?: Ck3SchemaEntry[];
+  entries?: SchemaEntry[];
 }
 
 /** Scan every schema folder under `root` and return the definitions found. */
 export function scanRoot(root: string, source: DefSource, opts: ScanOptions): Definition[] {
   const defs: Definition[] = [];
-  for (const entry of opts.entries ?? CK3_SCHEMA) {
+  for (const entry of opts.entries ?? activeProfile().schema) {
     const dir = path.join(root, ...entry.path.split("/"));
     const files: string[] = [];
     walkDir(dir, entry.ext ?? ".txt", files);

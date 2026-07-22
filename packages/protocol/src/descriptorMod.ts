@@ -3,7 +3,7 @@
  * (`descriptor.mod` inside the mod folder, `<name>.mod` next to it).
  *
  * The key set and tag list come from the official launcher docs
- * (ck3.paradoxwikis.com/Mod_structure) cross-checked against 86 real .mod
+ * (the Mod_structure page on the official wiki) cross-checked against 86 real .mod
  * files (launcher-generated + Workshop). No vscode imports: unit-testable.
  */
 import * as fs from "fs";
@@ -47,7 +47,7 @@ export const DESCRIPTOR_FIELDS: DescriptorField[] = [
     doc:
       "Free-form version string shown in the launcher. Bump it when you release " +
       "an update so players can tell versions apart. This is about your mod, " +
-      "not CK3 - the game version goes in `supported_version`.\n\n" +
+      "not the game - the game version goes in `supported_version`.\n\n" +
       '```\nversion="0.1.0"\n```',
     snippet: 'version="${1:0.1.0}"',
   },
@@ -56,7 +56,7 @@ export const DESCRIPTOR_FIELDS: DescriptorField[] = [
     required: true,
     repeatable: false,
     outerOnly: false,
-    summary: "Newest CK3 version the mod works with",
+    summary: "Newest game version the mod works with",
     doc:
       "The launcher compares this against the installed game and marks the mod " +
       "out of date when the game is newer. A `*` wildcard keeps the mod valid " +
@@ -85,7 +85,7 @@ export const DESCRIPTOR_FIELDS: DescriptorField[] = [
     summary: "Where the mod folder is - outer <name>.mod file only",
     doc:
       "Tells the launcher where the mod's files live. Absolute or relative to " +
-      "the CK3 user directory, forward slashes only.\n\n" +
+      "the game's user directory, forward slashes only.\n\n" +
       "**Leave this line out of `descriptor.mod`** - it is ignored there, and a " +
       "copied absolute path breaks when the mod is shared.\n\n" +
       '```\npath="mod/my_mod"\n```',
@@ -286,7 +286,7 @@ export function validateDescriptor(text: string, opts: { isDescriptorFile: boole
       endCol: 200,
       message: isHard
         ? `Missing ${field.key}= - the launcher needs it to list the mod.`
-        : "Missing supported_version= - the launcher cannot tell which CK3 version the mod is for.",
+        : "Missing supported_version= - the launcher cannot tell which game version the mod is for.",
     });
   }
 

@@ -10,7 +10,7 @@ import * as path from "path";
 import type { Ck3Config } from "./config";
 import { listFiles } from "@paradox-lsp/protocol/fsWalk";
 import {
-  CK3_LANGUAGES,
+  LOC_LANGUAGES,
   buildTranslation,
   detectLocFileLanguage,
   mergeTranslation,
@@ -55,7 +55,7 @@ export async function createTranslationCommand(cfg: Ck3Config, log: (msg: string
         });
   if (!source) return;
 
-  const targetChoices = [...CK3_LANGUAGES.filter((l) => l !== source && !present.includes(l)), "other..."];
+  const targetChoices = [...LOC_LANGUAGES.filter((l) => l !== source && !present.includes(l)), "other..."];
   let target = await vscode.window.showQuickPick(targetChoices, {
     title: "Translate to",
     placeHolder: "New language to scaffold",

@@ -1,5 +1,5 @@
 /**
- * Parser for `ck3-tiger --json` reports.
+ * Parser for tiger `--json` reports (the Paradox script validator family).
  *
  * Kept separate from the process management in tiger.ts so it stays free of
  * `vscode` imports and defensively tolerant of format drift between tiger

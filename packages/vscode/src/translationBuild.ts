@@ -13,7 +13,7 @@
  *
  * No `vscode` imports: unit-tested in plain Node.
  */
-import { buildTranslation, detectLocFileLanguage } from "./translationCore";
+import { buildTranslation, detectLocFileLanguage } from "@paradox-lsp/protocol/translationCore";
 
 export interface SourceLocFile {
   /** Path relative to the source mod root, forward or back slashes. */

@@ -1,15 +1,16 @@
 /**
- * Schema loading: the bundled CK3 schema table merged with an optional
- * per-workspace overlay at `<mod>/.ck3modding/schema.json`, so total-conversion
- * frameworks can teach the extension their own folders without a release.
+ * Schema loading: the active game profile's bundled schema table merged with an
+ * optional per-workspace overlay at `<mod>/<configDir>/schema.json`, so
+ * total-conversion frameworks can teach the extension their own folders
+ * without a release.
  */
 import * as fs from "fs";
 import * as path from "path";
-import { CK3_SCHEMA, PREFIX_REFS, REF_FIELDS } from "./ck3Schema";
-import { STRUCTURE_SOURCES } from "./structures";
+import { activeProfile } from "../games/active";
+import type { GameProfile } from "../games/profile";
 import type {
   AmbientScope,
-  Ck3SchemaEntry,
+  SchemaEntry,
   KeySpec,
   RefField,
   SchemaOverlay,
@@ -29,7 +30,7 @@ export interface StructureIndex {
 }
 
 export interface SchemaData {
-  entries: Ck3SchemaEntry[];
+  entries: SchemaEntry[];
   /** key -> field spec (merged). */
   refFields: Map<string, RefField>;
   /** value prefix -> candidate kinds. */
@@ -38,7 +39,7 @@ export interface SchemaData {
   structures: StructureIndex;
 }
 
-function buildStructureIndex(entries: Ck3SchemaEntry[]): StructureIndex {
+function buildStructureIndex(profile: GameProfile, entries: SchemaEntry[]): StructureIndex {
   const keysByKindBlock = new Map<string, Map<string, Map<string, KeySpec>>>();
   const ambientByKind = new Map<string, Map<string, AmbientScope>>();
   for (const entry of entries) {
@@ -63,22 +64,23 @@ function buildStructureIndex(entries: Ck3SchemaEntry[]): StructureIndex {
   return {
     keysByKindBlock,
     ambientByKind,
-    source: (kind) => STRUCTURE_SOURCES[kind],
+    source: (kind) => profile.structureSources[kind],
   };
 }
 
 export function loadSchema(modPath: string | string[] | null, log?: (msg: string) => void): SchemaData {
-  const entries = [...CK3_SCHEMA];
+  const profile = activeProfile();
+  const entries = [...profile.schema];
   const refFields = new Map<string, RefField>();
-  for (const f of REF_FIELDS) refFields.set(f.key, f);
-  const prefixRefs: Record<string, string[]> = { ...PREFIX_REFS };
+  for (const f of profile.refFields) refFields.set(f.key, f);
+  const prefixRefs: Record<string, string[]> = { ...profile.prefixRefs };
 
   // Multi-mod workspaces: every workspace mod may carry an overlay; later
   // roots win on collisions (roots are passed in load order, mod-of-record
   // first — collisions are rare and per-path).
   const roots = modPath === null ? [] : Array.isArray(modPath) ? modPath : [modPath];
   for (const root of roots) {
-    const overlayFile = path.join(root, ".ck3modding", "schema.json");
+    const overlayFile = path.join(root, profile.configDirName, "schema.json");
     try {
       if (!fs.existsSync(overlayFile)) continue;
       const overlay = JSON.parse(fs.readFileSync(overlayFile, "utf8")) as SchemaOverlay;
@@ -102,5 +104,5 @@ export function loadSchema(modPath: string | string[] | null, log?: (msg: string
     }
   }
 
-  return { entries, refFields, prefixRefs, structures: buildStructureIndex(entries) };
+  return { entries, refFields, prefixRefs, structures: buildStructureIndex(profile, entries) };
 }

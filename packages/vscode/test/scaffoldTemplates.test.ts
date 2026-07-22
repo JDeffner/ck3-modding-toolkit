@@ -201,7 +201,7 @@ describe("scaffoldOnActionHook", () => {
 });
 
 describe("scaffoldScripted", () => {
-  it("effect: emits a CK3Doc stub with @scope and @param, under scripted_effects/", () => {
+  it("effect: emits a PdxDoc stub with @scope and @param, under scripted_effects/", () => {
     const r = scaffoldScripted("mymod", "mymod_do_thing", true);
     const f = scriptFile(r);
     expect(f.relPath).toBe("common/scripted_effects/mymod_scripted_effects.txt");
@@ -213,7 +213,7 @@ describe("scaffoldScripted", () => {
     assertCleanScript(c);
   });
 
-  it("trigger: emits a CK3Doc stub with @scope, under scripted_triggers/", () => {
+  it("trigger: emits a PdxDoc stub with @scope, under scripted_triggers/", () => {
     const r = scaffoldScripted("mymod", "mymod_is_thing", false);
     const f = scriptFile(r);
     expect(f.relPath).toBe("common/scripted_triggers/mymod_scripted_triggers.txt");

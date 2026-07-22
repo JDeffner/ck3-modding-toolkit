@@ -7,7 +7,9 @@ import { CodeActionKind, type CodeAction, type Diagnostic, type Range } from "vs
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import type { ServerData } from "../serverData";
 import { findLocKeyRefs, type LocKeyRef } from "@paradox-lsp/protocol/locRefs";
+import { clientCommands } from "@paradox-lsp/protocol/protocol";
 import { getLineText } from "../documents";
+import { activeProfile } from "../games/active";
 
 export function locKeyRefAt(lineText: string, character: number): LocKeyRef | null {
   const refs = findLocKeyRefs(lineText);
@@ -28,10 +30,10 @@ export function provideCodeActions(
     const key = (d.data as { key?: string } | undefined)?.key;
     if (!key) continue;
     actions.push({
-      title: `CK3: Create localization key "${key}"`,
+      title: `${activeProfile().shortName}: Create localization key "${key}"`,
       kind: CodeActionKind.QuickFix,
       diagnostics: [d],
-      command: { command: "ck3.editLocalization", title: "Create localization", arguments: [key] },
+      command: { command: clientCommands.editLocalization, title: "Create localization", arguments: [key] },
     });
   }
 
@@ -39,17 +41,17 @@ export function provideCodeActions(
   if (!ref) return actions;
 
   actions.push({
-    title: `CK3: Edit localization for "${ref.key}"`,
+    title: `${activeProfile().shortName}: Edit localization for "${ref.key}"`,
     kind: CodeActionKind.QuickFix,
-    command: { command: "ck3.editLocalization", title: "Edit localization", arguments: [ref.key] },
+    command: { command: clientCommands.editLocalization, title: "Edit localization", arguments: [ref.key] },
   });
 
   if (data.index.lookup(ref.key).some((d) => d.kind === "loc_key")) {
     actions.push({
-      title: "CK3: Open localization side by side",
+      title: `${activeProfile().shortName}: Open localization side by side`,
       kind: CodeActionKind.Empty,
       command: {
-        command: "ck3.openLocalizationSideBySide",
+        command: clientCommands.openLocalizationSideBySide,
         title: "Open localization side by side",
         arguments: [ref.key],
       },

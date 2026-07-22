@@ -10,8 +10,8 @@ import { SemanticTokensBuilder } from "vscode-languageserver/node";
 import type { SemanticTokens, SemanticTokensLegend } from "vscode-languageserver/node";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import type { TokenKind } from "@paradox-lsp/protocol/types";
-import type { Ck3SchemaEntry, RefField } from "../schema/types";
-import { dynamicRefKinds } from "../schema/ck3Schema";
+import type { SchemaEntry, RefField } from "../schema/types";
+import { dynamicRefKinds } from "../games/jomini/variables";
 import type { StructureIndex } from "../schema/loader";
 import type { ServerData } from "../serverData";
 import { walkStatements, type AssignmentNode, type BlockNode, type ScalarNode } from "../parser";
@@ -72,7 +72,7 @@ export function provideSemanticTokens(
   data: ServerData,
   document: TextDocument,
   refFields?: Map<string, RefField>,
-  entry?: Ck3SchemaEntry | null,
+  entry?: SchemaEntry | null,
   structures?: StructureIndex
 ): SemanticTokens {
   const { result, lineIndex } = getParse(document);

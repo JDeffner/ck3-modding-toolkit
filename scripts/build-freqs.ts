@@ -18,7 +18,7 @@ import * as path from "path";
 import { classifyFile } from "../packages/server/src/index/indexer";
 import { walkStatements, parseScript, decode, type Statement } from "../packages/server/src/parser";
 import { classifyKeyword } from "../packages/server/src/contextKeywords";
-import { CK3_SCHEMA } from "../packages/server/src/schema/ck3Schema";
+import { CK3_SCHEMA } from "../packages/server/src/games/ck3/schema";
 import { FREQ_CONTEXTS, type FreqContext, type FreqData } from "../packages/server/src/schema/freqs";
 import { devPath } from "./devPaths";
 

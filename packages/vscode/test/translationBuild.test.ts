@@ -4,7 +4,7 @@
  * source dependency, playset, and the TRANSLATE.md prompt invariants.
  */
 import { describe, expect, it } from "vitest";
-import { buildTranslationMod, targetLocPath } from "../src/translationMod";
+import { buildTranslationMod, targetLocPath } from "../src/translationBuild";
 
 const BOM = "﻿";
 

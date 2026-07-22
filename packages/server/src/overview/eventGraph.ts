@@ -1,5 +1,5 @@
 /**
- * ck3/eventGraph: event ↔ trigger_event ↔ on_action chains as a graph, scoped
+ * paradox/eventGraph: event ↔ trigger_event ↔ on_action chains as a graph, scoped
  * to a root definition or namespace to stay readable. Edges come from the
  * reference index (mod usage sites); node metadata from the definition index.
  */

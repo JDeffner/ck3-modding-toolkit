@@ -1,5 +1,5 @@
 /**
- * ck3/guiWidgetEdit backend: turn a preview interaction (drag, property-panel
+ * paradox/guiWidgetEdit backend: turn a preview interaction (drag, property-panel
  * change) into a precise text edit on the .gui source.
  *
  * The widget is addressed by the 0-based line its instance statement starts

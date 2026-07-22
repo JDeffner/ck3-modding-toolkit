@@ -42,9 +42,10 @@
 import { CompletionItemKind, InsertTextFormat, MarkupKind, type CompletionItem } from "vscode-languageserver/node";
 import type { TextDocument } from "vscode-languageserver-textdocument";
 import type { Definition, DefSource, TokenData } from "@paradox-lsp/protocol/types";
-import type { Ck3SchemaEntry, KeySpec, RefField } from "../schema/types";
+import type { SchemaEntry, KeySpec, RefField } from "../schema/types";
 import type { FreqContext, FreqData } from "../schema/freqs";
-import { BLOCK_REF_FIELDS, VAR_PREFIX_KINDS, dynamicRefKinds } from "../schema/ck3Schema";
+import { VAR_PREFIX_KINDS, dynamicRefKinds } from "../games/jomini/variables";
+import { activeProfile } from "../games/active";
 import { emptyFreqData } from "../schema/freqs";
 import { isLocProperty } from "@paradox-lsp/protocol/locProperties";
 import type { ServerData } from "../serverData";
@@ -57,7 +58,7 @@ import { getParse, getSavedScopes } from "../parseCache";
 import { inferScopeAt } from "../scopes/inference";
 import { inferenceContextFor, variableTypes } from "../scopes/varTypes";
 import type { Scope } from "../scopes/model";
-import type { Ck3Settings } from "@paradox-lsp/protocol/protocol";
+import type { ParadoxSettings } from "@paradox-lsp/protocol/protocol";
 import { assetDirContext, provideAssetDirCompletion, provideBareNameCompletion } from "./assetPaths";
 
 /** Cap on items per response; the client re-queries per keystroke (isIncomplete). */
@@ -154,7 +155,7 @@ function defItem(d: Definition, origin: string = d.source): CompletionItem {
 }
 
 /**
- * Completion documentation for a definition with CK3Doc (§E3): prose first, then
+ * Completion documentation for a definition with PdxDoc (§E3): prose first, then
  * `@param NAME — desc` lines. Returns undefined when the def carries no doc.
  */
 export function defDocMarkdown(d: Definition): string | undefined {
@@ -204,7 +205,7 @@ const SEPARATORS = new Set(["_", ".", "-", ":", " ", "/", "\\", "'", '"', "$", "
 function isStrongPosition(label: string, labelLow: string, i: number): boolean {
   if (i === 0) return true;
   if (SEPARATORS.has(labelLow[i - 1])) return true;
-  // Uppercase boundary (rare in CK3 script, common in GUI names).
+  // Uppercase boundary (rare in Paradox script, common in GUI names).
   return label[i] !== labelLow[i] && label[i - 1] === labelLow[i - 1];
 }
 
@@ -245,7 +246,7 @@ export class CompletionFeature {
   /** Bundled per-context frequency tables (§C3); empty until setFreqs / fail-soft. */
   private freqs: FreqData = emptyFreqData();
   /** Content roots for filesystem-backed asset-path completion; null until pushed. */
-  private settings: Ck3Settings | null = null;
+  private settings: ParadoxSettings | null = null;
 
   constructor(
     private readonly data: ServerData,
@@ -263,7 +264,7 @@ export class CompletionFeature {
   }
 
   /** Push the resolved settings (paths) used for asset-path completion. */
-  setSettings(settings: Ck3Settings): void {
+  setSettings(settings: ParadoxSettings): void {
     this.settings = settings;
   }
 
@@ -285,7 +286,7 @@ export class CompletionFeature {
     document: TextDocument,
     offset: number,
     rootScopes: Set<Scope> | null,
-    entry: Ck3SchemaEntry | null = null,
+    entry: SchemaEntry | null = null,
     limit: number = MAX_ITEMS
   ): CompletionResult {
     const { result, lineIndex } = getParse(document);
@@ -457,7 +458,7 @@ export class CompletionFeature {
 
   /**
    * completionItem/resolve: attach documentation on selection. Token docs come
-   * from script_docs/wiki data; definition docs from the index (CK3Doc §E3).
+   * from script_docs/wiki data; definition docs from the index (PdxDoc §E3).
    */
   resolve(item: CompletionItem): CompletionItem {
     const data = item.data as { t?: string; k?: string; n?: string } | undefined;
@@ -621,7 +622,7 @@ export class CompletionFeature {
     key: string,
     result: ParseResult,
     offset: number,
-    entry: Ck3SchemaEntry | null
+    entry: SchemaEntry | null
   ): CompletionItem[] {
     // Bare-filename `.dds` field (trait icon, death-reason icon, building type_icon):
     // list *.dds from the engine-fixed base dirs across roots, mod-first.
@@ -638,7 +639,7 @@ export class CompletionFeature {
     if (!field) {
       const named = blockStackFromParse(result, offset).filter((s) => s !== "<anon>");
       const block = named[named.length - 1]?.toLowerCase();
-      const kinds = block ? BLOCK_REF_FIELDS[block]?.[key] : undefined;
+      const kinds = block ? activeProfile().blockRefFields[block]?.[key] : undefined;
       if (kinds) field = { key, kinds };
     }
     // Pattern families: has_character_flag = <flag>, has_variable = <variable>,
@@ -722,7 +723,7 @@ export class CompletionFeature {
   private listRefItems(
     result: ParseResult,
     offset: number,
-    entry: Ck3SchemaEntry | null
+    entry: SchemaEntry | null
   ): CompletionItem[] | null {
     const named = blockStackFromParse(result, offset).filter((s) => s !== "<anon>");
     const innermost = named[named.length - 1]?.toLowerCase();
@@ -763,7 +764,7 @@ export class CompletionFeature {
     document: TextDocument,
     prefix: string,
     rootScopes: Set<Scope> | null,
-    entry: Ck3SchemaEntry | null
+    entry: SchemaEntry | null
   ): CompletionItem[] | null {
     const p = prefix.toLowerCase();
     if (FREEFORM_PREFIXES.has(p)) return [];

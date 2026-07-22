@@ -17,6 +17,9 @@ import {
   ValueStatementNode,
 } from "./cst.js";
 import { Token, tokenize } from "./lexer.js";
+// Display prose only (game name in the unclosed-brace hint) — the parser
+// itself stays game-agnostic.
+import { activeProfile } from "../games/active";
 
 const OPERATORS: ReadonlySet<string> = new Set([
   "=",
@@ -282,7 +285,7 @@ class Parser {
           code: "unclosed-brace",
           message:
             "Unclosed '{': the rest of the file is swallowed by this block. " +
-            "CK3 silently ignores everything after an unbalanced brace.",
+            `${activeProfile().shortName} silently ignores everything after an unbalanced brace.`,
           range: { start: openBrace, end: openBrace + 1 },
         });
         closeBrace = null;

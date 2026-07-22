@@ -5,7 +5,7 @@
  *
  * Two sources, script_docs-style:
  *  - bundled baseline harvested from the modding wiki's Data types page
- *    (packages/server/data/ck3/dataTypes.json, built by scripts/build-data-types-json.ts);
+ *    (packages/server/data/<game>/dataTypes.json, built by scripts/build-data-types-json.ts);
  *  - the user's own `data_types.log`, written by the game's `DumpDataTypes`
  *    console command — complete and version-exact, so its entries win.
  *
@@ -13,7 +13,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import BUNDLED_JSON from "../../data/ck3/dataTypes.json";
+import { activeProfile } from "../games/active";
 
 export interface DataTypeMember {
   /** Return type name; null when unknown (wiki lists some as [unregistered]). */
@@ -60,8 +60,9 @@ function typeMembers(data: DataTypesData, type: string): Map<string, DataTypeMem
 }
 
 export function loadBundledDataTypes(): DataTypesData {
-  const bundled = BUNDLED_JSON as unknown as BundledShape;
   const data = emptyDataTypes();
+  const bundled = activeProfile().bundledDataTypes as BundledShape | undefined;
+  if (!bundled) return data;
   for (const [name, ret] of Object.entries(bundled.globalPromotes)) {
     data.globals.set(name, { ret, args: null, kind: "promote", src: "wiki" });
     data.count++;

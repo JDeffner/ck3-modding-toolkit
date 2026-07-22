@@ -12,11 +12,11 @@
  *
  * Provenance strings for hover are the `.info` folder name (see STRUCTURE_SOURCES).
  */
-import type { KeySpec, StructureSpec } from "./types";
+import type { KeySpec, StructureSpec } from "../../schema/types";
 // Bundled full harvest of every _*.info schema doc (scripts/build-structures-json.ts):
 // ~70 kinds, ~1300 documented keys with vanilla usage counts. Merged UNDER the
 // hand-curated specs below — curated docs always win on key collisions.
-import HARVESTED_JSON from "../../data/ck3/structures.json";
+import HARVESTED_JSON from "../../../data/ck3/structures.json";
 
 interface HarvestedShape {
   sources: Record<string, string>;

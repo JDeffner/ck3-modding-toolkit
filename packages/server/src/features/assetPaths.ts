@@ -12,7 +12,7 @@
 import { CompletionItemKind, type CompletionItem } from "vscode-languageserver/node";
 import * as fs from "fs";
 import * as path from "path";
-import type { Ck3Settings } from "@paradox-lsp/protocol/protocol";
+import type { ParadoxSettings } from "@paradox-lsp/protocol/protocol";
 import type { CompletionResult } from "./completion";
 
 /** Top-level folders under a content root that hold referenceable assets. */
@@ -40,7 +40,7 @@ interface Root {
 }
 
 /** Content roots in shadowing order (mod → parents → vanilla), non-null only. */
-export function assetRoots(settings: Ck3Settings): Root[] {
+export function assetRoots(settings: ParadoxSettings): Root[] {
   const roots: Root[] = [];
   if (settings.modPath) roots.push({ root: settings.modPath, label: "mod" });
   for (const p of settings.parentPaths ?? []) roots.push({ root: p, label: "parent" });
@@ -90,7 +90,7 @@ function startsWithFold(name: string, prefix: string): boolean {
  * user drills down; files complete as-is. isIncomplete so the client re-queries
  * per keystroke.
  */
-export function provideAssetDirCompletion(settings: Ck3Settings, pathPrefix: string): CompletionResult {
+export function provideAssetDirCompletion(settings: ParadoxSettings, pathPrefix: string): CompletionResult {
   const slash = pathPrefix.lastIndexOf("/");
   const parentRel = slash >= 0 ? pathPrefix.slice(0, slash) : "";
   const partial = slash >= 0 ? pathPrefix.slice(slash + 1) : pathPrefix;
@@ -135,7 +135,7 @@ export function provideAssetDirCompletion(settings: Ck3Settings, pathPrefix: str
  * not a mapped bare-name field.
  */
 export function provideBareNameCompletion(
-  settings: Ck3Settings,
+  settings: ParadoxSettings,
   kind: string | null | undefined,
   key: string
 ): CompletionItem[] | null {

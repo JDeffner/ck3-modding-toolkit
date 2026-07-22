@@ -23,10 +23,10 @@ import { provideTextureHover } from "../src/features/textureHover";
 import { CompletionFeature, MAX_ITEMS } from "../src/features/completion";
 import { ServerData } from "../src/serverData";
 import { loadSchema } from "../src/schema/loader";
-import type { Ck3Settings } from "@paradox-lsp/protocol/protocol";
+import type { ParadoxSettings } from "@paradox-lsp/protocol/protocol";
 import { devPath } from "../../../scripts/devPaths";
 
-function makeSettings(over: Partial<Ck3Settings>): Ck3Settings {
+function makeSettings(over: Partial<ParadoxSettings>): ParadoxSettings {
   return {
     gamePath: null,
     logsPath: null,
@@ -63,7 +63,7 @@ describe("assetDirContext", () => {
 
 describe("provideAssetDirCompletion (synthesized roots, shadowing)", () => {
   let root: string;
-  let settings: Ck3Settings;
+  let settings: ParadoxSettings;
 
   beforeAll(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "ck3-assetpaths-"));
@@ -119,7 +119,7 @@ describe("provideAssetDirCompletion (synthesized roots, shadowing)", () => {
 
 describe("provideBareNameCompletion (synthesized roots)", () => {
   let root: string;
-  let settings: Ck3Settings;
+  let settings: ParadoxSettings;
 
   beforeAll(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "ck3-barename-"));

@@ -245,7 +245,7 @@ ${locBody}`;
 // --- scripted effects / triggers ----------------------------------------------
 
 /**
- * A scripted effect or trigger, prefaced with a CK3Doc stub (§E) so the
+ * A scripted effect or trigger, prefaced with a PdxDoc stub (§E) so the
  * documentation convention spreads by default: a prose line plus a `@scope`
  * tag the modder fills in. Effects get an `@param` placeholder; triggers a
  * `@returns`-shaped hint is not emitted (triggers implicitly return yes/no).

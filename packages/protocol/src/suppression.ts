@@ -6,8 +6,8 @@
  * fail-soft — bad setting values or malformed comments are ignored, never thrown.
  *
  * Two mechanisms:
- *   1. Settings: `ck3.diagnostics.ignore` (diagnostic codes) and
- *      `ck3.diagnostics.ignorePatterns` (globs on the workspace-relative path).
+ *   1. Settings: the diagnostics.ignore setting (diagnostic codes) and
+ *      the diagnostics.ignorePatterns setting (globs on the workspace-relative path).
  *   2. Inline comments: `# ck3m:ignore <code…>` (same line) and
  *      `# ck3m:ignore-next-line <code…>` (following line); a bare form with no
  *      codes suppresses every diagnostic on the target line.

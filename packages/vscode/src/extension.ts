@@ -50,9 +50,9 @@ import {
   modFileChangedNotification,
   reloadDocsRequest,
   statusNotification,
-  type Ck3InitOptions,
-  type Ck3Settings,
-  type Ck3StatusPayload,
+  type ParadoxInitOptions,
+  type ParadoxSettings,
+  type StatusPayload,
   type LocEntryInfo,
   type LookupLocParams,
   type ReloadDocsResult,
@@ -87,8 +87,9 @@ function log(msg: string): void {
   output.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
 }
 
-function toSettings(c: Ck3Config): Ck3Settings {
+function toSettings(c: Ck3Config): ParadoxSettings {
   return {
+    gameId: "ck3",
     gamePath: c.gamePath,
     logsPath: c.logsPath,
     modPath: c.modPath,
@@ -139,7 +140,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const statusBar = new Ck3StatusBar();
   context.subscriptions.push(statusBar);
-  let lastServerStatus: Ck3StatusPayload = {
+  let lastServerStatus: StatusPayload = {
     tokens: 0,
     tokensFromScriptDocs: false,
     definitions: 0,
@@ -199,7 +200,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       options: { execArgv: ["--nolazy", "--inspect=6009"] },
     },
   };
-  const initOptions: Ck3InitOptions = {
+  const initOptions: ParadoxInitOptions = {
     storageDir,
     wikidocsDir: context.asAbsolutePath(path.join("data", "ck3", "wikidocs")),
     settings: toSettings(cfg),
@@ -236,7 +237,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const lc = new LanguageClient("ck3", "CK3 Modding", serverOptions, clientOptions);
   client = lc;
 
-  lc.onNotification(statusNotification, (payload: Ck3StatusPayload) => {
+  lc.onNotification(statusNotification, (payload: StatusPayload) => {
     lastServerStatus = payload;
     updateStatus();
   });

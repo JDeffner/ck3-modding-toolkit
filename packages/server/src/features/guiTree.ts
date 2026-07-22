@@ -1,7 +1,7 @@
 /**
  * GUI widget tree: turn a PdxGui document into the hierarchy a modder thinks
  * in — windows > containers > widgets, with template/type declarations and
- * animation states — for the CK3: Show GUI Widget Tree webview.
+ * animation states — for the Show GUI Widget Tree webview.
  *
  * PdxGui reuses the jomini syntax, so the tolerant script parser handles it.
  * Detection is INVERSE: every block child is a node unless its key is a known
