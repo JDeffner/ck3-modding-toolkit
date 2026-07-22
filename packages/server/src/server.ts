@@ -671,26 +671,32 @@ function rescanModFile(fsPath: string): void {
 
 // ---- lifecycle ---------------------------------------------------------------
 
+/**
+ * Bundled-data locations for the ACTIVE profile: an explicit client override
+ * wins, else data/<gameId>/wikidocs next to the bundle (dist/server.js sits
+ * next to data/ in the repo checkout, the .vsix and the release tarball
+ * alike). freqs.json ships next to wikidocs/; both fail soft when the game
+ * bundles no data. Re-derived whenever the game profile changes.
+ */
+function deriveBundledDataDirs(): void {
+  wikidocsDir = clientWikidocsDir;
+  if (!wikidocsDir) {
+    const bundled = path.resolve(__dirname, "..", "data", activeProfile().id, "wikidocs");
+    if (fs.existsSync(bundled)) wikidocsDir = bundled;
+  }
+  freqsDir = wikidocsDir ? path.dirname(wikidocsDir) : "";
+}
+let clientWikidocsDir = "";
+
 connection.onInitialize((params: InitializeParams): InitializeResult => {
   const init = (params.initializationOptions ?? {}) as Partial<ParadoxInitOptions>;
   storageDir = init.storageDir ?? "";
-  wikidocsDir = init.wikidocsDir ?? "";
+  clientWikidocsDir = init.wikidocsDir ?? "";
   // Merge onto the defaults: bare clients may send partial settings (e.g.
   // only gameId), and every downstream consumer assumes the full shape.
   if (init.settings) settings = { ...defaultSettings(), ...init.settings };
   setActiveProfile(resolveProfile(settings.gameId));
-
-  // Bare-client fallbacks: the VSCode client sends fully resolved paths; a
-  // plain LSP client (neovim over --stdio) may send partial settings or none.
-  if (!wikidocsDir) {
-    // dist/server.js sits next to data/<game>/ in the repo checkout, the
-    // .vsix and the release tarball alike.
-    const bundled = path.resolve(__dirname, "..", "data", activeProfile().id, "wikidocs");
-    if (fs.existsSync(bundled)) wikidocsDir = bundled;
-  }
-  // freqs.json ships next to wikidocs/ (both under data/<game>/); derive it from
-  // wikidocsDir so no new client-side wiring is needed. Fail-soft if empty.
-  freqsDir = wikidocsDir ? path.dirname(wikidocsDir) : "";
+  deriveBundledDataDirs();
   if (!storageDir) {
     storageDir = path.join(os.tmpdir(), "paradox-lsp");
     try {
@@ -745,7 +751,12 @@ connection.onInitialized(() => {
 connection.onNotification(configChangedNotification, (incoming: ParadoxSettings) => {
   const newSettings: ParadoxSettings = { ...defaultSettings(), ...incoming };
   const gameChanged = resolveProfile(newSettings.gameId) !== activeProfile();
-  if (gameChanged) setActiveProfile(resolveProfile(newSettings.gameId));
+  if (gameChanged) {
+    setActiveProfile(resolveProfile(newSettings.gameId));
+    // Bundled wiki/freqs are per-game; re-derive and re-rank for the new one.
+    deriveBundledDataDirs();
+    completion.setFreqs(loadFreqs(freqsDir));
+  }
   const pathsChanged =
     gameChanged ||
     newSettings.gamePath !== settings.gamePath ||

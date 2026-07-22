@@ -35,13 +35,16 @@ export interface ParadoxSettings {
   diagnosticsVanilla: boolean;
 }
 
-/** initializationOptions passed at LanguageClient start. */
+/** initializationOptions passed at LanguageClient start. All fields optional:
+ * the server has fail-soft fallbacks for bare clients. */
 export interface ParadoxInitOptions {
   /** Server-side cache directory (the extension's global storage path). */
-  storageDir: string;
-  /** Absolute path of the bundled wikidocs/ folder. */
-  wikidocsDir: string;
-  settings: ParadoxSettings;
+  storageDir?: string;
+  /** Override for the bundled wikidocs/ folder. Normally omitted: the server
+   * derives data/<gameId>/wikidocs next to its own bundle, which stays
+   * correct across game profiles. */
+  wikidocsDir?: string;
+  settings?: ParadoxSettings;
 }
 
 // ---- client command ids ----------------------------------------------------

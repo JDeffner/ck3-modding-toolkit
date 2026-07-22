@@ -21,8 +21,10 @@ jobs:
       - run: pnpm run typecheck
       - name: Game boundary (no game strings outside games/ and vscode/)
         run: node scripts/check-game-boundary.mjs
-      - run: pnpm test
+      # Compile BEFORE the tests: the LSP/stdio/vic3 smoke tests fork
+      # dist/server.js and silently skip when it does not exist.
       - run: pnpm run compile
+      - run: pnpm test
       - name: Package (vsix)
         working-directory: packages/vscode
         run: npx vsce package --allow-missing-repository --no-dependencies

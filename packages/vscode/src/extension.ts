@@ -201,9 +201,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       options: { execArgv: ["--nolazy", "--inspect=6009"] },
     },
   };
+  // wikidocsDir is deliberately NOT sent: the server derives data/<gameId>/
+  // next to its bundle (identical folder in this vsix), which keeps the
+  // bundled wiki/freqs profile-correct even when the game changes.
   const initOptions: ParadoxInitOptions = {
     storageDir,
-    wikidocsDir: context.asAbsolutePath(path.join("data", "ck3", "wikidocs")),
     settings: toSettings(cfg),
   };
   const clientOptions: LanguageClientOptions = {

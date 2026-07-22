@@ -46,10 +46,12 @@ jobs:
 
       - run: pnpm typecheck
 
+      # Compile BEFORE the tests: the LSP/stdio/vic3 smoke tests fork
+      # dist/server.js and silently skip when it does not exist.
+      - run: pnpm run compile
+
       # Corpus-gated tests skip automatically (no game files in CI).
       - run: pnpm test
-
-      - run: pnpm run compile
 
       # Everything in the package's dist/ ships in the vsix; stray bundles must not.
       - run: rm -f packages/vscode/dist/*.cjs

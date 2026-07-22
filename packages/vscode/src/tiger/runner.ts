@@ -218,7 +218,7 @@ export class TigerRunner implements vscode.Disposable {
       if (cfg.gamePath) {
         const gameDir =
           path.basename(cfg.gamePath).toLowerCase() === "game" ? path.dirname(cfg.gamePath) : cfg.gamePath;
-        args.push("--ck3", gameDir);
+        args.push(`--${cfg.gameId}`, gameDir);
       }
       args.push(cfg.modPath);
       this.log(`tiger baseline: ${cfg.tigerPath} ${args.join(" ")}`);
