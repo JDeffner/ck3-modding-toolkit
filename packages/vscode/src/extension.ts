@@ -14,7 +14,7 @@ import {
 } from "vscode-languageclient/node";
 import { modRootFor, readConfig, type Ck3Config } from "./config";
 import { ensureFileAssociations, wireLanguageDetection } from "./languageMode";
-import { findDownloadedTiger } from "./tigerDownload";
+import { findDownloadedTiger, tigerFlavorFor } from "./tigerDownload";
 import { downloadTigerCommand, maybeNudgeSetup, runSetup, type SetupDeps } from "./setup";
 import { Ck3StatusBar } from "./statusBar";
 import { TigerRunner } from "./tiger/runner";
@@ -89,7 +89,7 @@ function log(msg: string): void {
 
 function toSettings(c: Ck3Config): ParadoxSettings {
   return {
-    gameId: "ck3",
+    gameId: c.gameId,
     gamePath: c.gamePath,
     logsPath: c.logsPath,
     modPath: c.modPath,
@@ -109,10 +109,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const storageDir = context.globalStorageUri.fsPath;
 
-  // Effective tiger: explicit setting wins, else the copy we downloaded ourselves.
+  // Effective tiger: explicit setting wins, else the copy we downloaded
+  // ourselves (per-game flavor; Vic3 never uses the ck3.tigerPath setting).
   const resolveConfig = () => {
     const c = readConfig();
-    if (!c.tigerPath) c.tigerPath = findDownloadedTiger(storageDir);
+    if (!c.tigerPath) c.tigerPath = findDownloadedTiger(storageDir, tigerFlavorFor(c.gameId));
     return c;
   };
 

@@ -8,6 +8,7 @@ import * as path from "path";
 import { spawn, type ChildProcess } from "child_process";
 import type { Ck3Config } from "../config";
 import { isUnder, modRootFor } from "../config";
+import { hasMetadataDescriptor } from "@paradox-lsp/protocol/descriptorMetadata";
 import { parseTigerJson, type TigerReport } from "@paradox-lsp/protocol/tigerParser";
 import {
   isIgnoredByConfig,
@@ -26,6 +27,14 @@ const SEVERITY_MAP: Record<string, vscode.DiagnosticSeverity> = {
 };
 
 const DEBOUNCE_MS = 1500;
+
+function hasDescriptor(root: string): boolean {
+  try {
+    return fs.existsSync(path.join(root, "descriptor.mod")) || hasMetadataDescriptor(root);
+  } catch {
+    return false;
+  }
+}
 
 export class TigerRunner implements vscode.Disposable {
   private readonly diagnostics: vscode.DiagnosticCollection;
@@ -93,8 +102,8 @@ export class TigerRunner implements vscode.Disposable {
     // Multi-mod workspaces: validate the mod the saved file belongs to.
     const root = modRootFor(doc.uri.fsPath, cfg);
     if (!root) return;
-    // Don't even schedule a run for workspaces that are not CK3 mods.
-    if (!fs.existsSync(path.join(root, "descriptor.mod"))) return;
+    // Don't even schedule a run for workspaces that are not mods.
+    if (!hasDescriptor(root)) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => this.run(false, root), DEBOUNCE_MS);
   }
@@ -112,17 +121,18 @@ export class TigerRunner implements vscode.Disposable {
       if (manual) void vscode.window.showWarningMessage("CK3: no mod folder (open one or set ck3.modPath).");
       return;
     }
-    // tiger refuses folders without a mod descriptor. A manual run gets a clear
-    // message; automatic runs (save, config change) skip silently so opening a
-    // non-CK3 workspace never spawns tiger or throws errors at the user.
-    if (!fs.existsSync(path.join(modRoot, "descriptor.mod"))) {
+    // tiger refuses folders without a mod descriptor (descriptor.mod for CK3,
+    // .metadata/metadata.json for Vic3). A manual run gets a clear message;
+    // automatic runs (save, config change) skip silently so opening a non-mod
+    // workspace never spawns tiger or throws errors at the user.
+    if (!hasDescriptor(modRoot)) {
       if (manual) {
         this.notifyError(
-          `CK3: ck3-tiger needs a descriptor.mod in the mod folder (${modRoot}). ` +
+          `CK3: tiger needs a mod descriptor in the mod folder (${modRoot}). ` +
             "Is ck3.modPath pointing at the mod itself? Mods created via the launcher have one."
         );
       } else {
-        this.log(`tiger: skipped, no descriptor.mod in ${modRoot} (not a CK3 mod workspace?)`);
+        this.log(`tiger: skipped, no mod descriptor in ${modRoot} (not a mod workspace?)`);
       }
       return;
     }
@@ -137,11 +147,12 @@ export class TigerRunner implements vscode.Disposable {
 
     const args = ["--json", ...this.extraArgs(modRoot)];
     if (cfg.gamePath) {
-      // tiger's --ck3 wants the install root (".../Crusader Kings III"), while
-      // ck3.gamePath points at its game/ data subfolder.
+      // tiger's game flag (--ck3 / --vic3, matching the profile id) wants the
+      // install root (".../Crusader Kings III"), while the resolved gamePath
+      // points at its game/ data subfolder.
       const gameDir =
         path.basename(cfg.gamePath).toLowerCase() === "game" ? path.dirname(cfg.gamePath) : cfg.gamePath;
-      args.push("--ck3", gameDir);
+      args.push(`--${cfg.gameId}`, gameDir);
     }
     args.push(modRoot);
 

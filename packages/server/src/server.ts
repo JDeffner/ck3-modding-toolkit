@@ -128,18 +128,21 @@ import { wordRangeAt } from "./wordAt";
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 
-let settings: ParadoxSettings = {
-  gamePath: null,
-  logsPath: null,
-  modPath: null,
-  parentPaths: [],
-  workspaceMods: [],
-  locLanguage: "english",
-  scopeInlayHints: false,
-  diagnosticsIgnore: [],
-  diagnosticsIgnorePatterns: [],
-  diagnosticsVanilla: false,
-};
+function defaultSettings(): ParadoxSettings {
+  return {
+    gamePath: null,
+    logsPath: null,
+    modPath: null,
+    parentPaths: [],
+    workspaceMods: [],
+    locLanguage: "english",
+    scopeInlayHints: false,
+    diagnosticsIgnore: [],
+    diagnosticsIgnorePatterns: [],
+    diagnosticsVanilla: false,
+  };
+}
+let settings: ParadoxSettings = defaultSettings();
 let storageDir = "";
 let wikidocsDir = "";
 let freqsDir = "";
@@ -672,7 +675,9 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
   const init = (params.initializationOptions ?? {}) as Partial<ParadoxInitOptions>;
   storageDir = init.storageDir ?? "";
   wikidocsDir = init.wikidocsDir ?? "";
-  if (init.settings) settings = init.settings;
+  // Merge onto the defaults: bare clients may send partial settings (e.g.
+  // only gameId), and every downstream consumer assumes the full shape.
+  if (init.settings) settings = { ...defaultSettings(), ...init.settings };
   setActiveProfile(resolveProfile(settings.gameId));
 
   // Bare-client fallbacks: the VSCode client sends fully resolved paths; a
@@ -737,7 +742,8 @@ connection.onInitialized(() => {
 
 // ---- custom protocol ----------------------------------------------------------
 
-connection.onNotification(configChangedNotification, (newSettings: ParadoxSettings) => {
+connection.onNotification(configChangedNotification, (incoming: ParadoxSettings) => {
+  const newSettings: ParadoxSettings = { ...defaultSettings(), ...incoming };
   const gameChanged = resolveProfile(newSettings.gameId) !== activeProfile();
   if (gameChanged) setActiveProfile(resolveProfile(newSettings.gameId));
   const pathsChanged =
@@ -768,7 +774,7 @@ connection.onNotification(configChangedNotification, (newSettings: ParadoxSettin
 connection.onNotification(modFileChangedNotification, (params: ModFileChangeParams) => {
   rescanModFile(params.fsPath);
   const lower = params.fsPath.toLowerCase();
-  if (lower.endsWith(".mod")) refreshModOrigin();
+  if (lower.endsWith(".mod") || lower.endsWith("metadata.json")) refreshModOrigin();
   if (lower.endsWith(".gui")) invalidateGuiDefsCache();
   // Cheap full re-harvest when a mod defines file or a gui textformatting file changed.
   if (lower.replace(/\\/g, "/").includes("common/defines/") || lower.endsWith(".gui")) harvestEngineData();

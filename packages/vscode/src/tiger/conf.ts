@@ -6,17 +6,19 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import type { Ck3Config } from "../config";
+import { tigerFlavorFor } from "../tigerDownload";
 
 export async function generateTigerConfCommand(cfg: Ck3Config): Promise<void> {
   if (!cfg.modPath) {
     void vscode.window.showWarningMessage("CK3: no mod folder (open one or set ck3.modPath).");
     return;
   }
-  const confFile = path.join(cfg.modPath, "ck3-tiger.conf");
+  const confName = `${tigerFlavorFor(cfg.gameId).prefix}.conf`;
+  const confFile = path.join(cfg.modPath, confName);
   if (fs.existsSync(confFile)) {
     const doc = await vscode.workspace.openTextDocument(confFile);
     await vscode.window.showTextDocument(doc);
-    void vscode.window.showInformationMessage("CK3: ck3-tiger.conf already exists — opened it instead.");
+    void vscode.window.showInformationMessage(`CK3: ${confName} already exists — opened it instead.`);
     return;
   }
   const content = [
@@ -37,6 +39,6 @@ export async function generateTigerConfCommand(cfg: Ck3Config): Promise<void> {
   const doc = await vscode.workspace.openTextDocument(confFile);
   await vscode.window.showTextDocument(doc);
   void vscode.window.showInformationMessage(
-    `CK3: generated ck3-tiger.conf (loc checks limited to ${cfg.locLanguage}).`
+    `CK3: generated ${confName} (loc checks limited to ${cfg.locLanguage}).`
   );
 }

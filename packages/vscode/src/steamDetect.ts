@@ -68,11 +68,17 @@ export function findSteamLibraries(): string[] {
   return [...libraries];
 }
 
-/** The CK3 `game` data folder, or null if the game is not found in any library. */
-export function findCk3GamePath(): string | null {
+/** A game's `game` data folder by Steam folder name ("Crusader Kings III",
+ * "Victoria 3"), or null when not found in any library. */
+export function findGameFolder(steamFolderName: string): string | null {
   for (const lib of findSteamLibraries()) {
-    const game = path.join(lib, "steamapps", "common", "Crusader Kings III", "game");
+    const game = path.join(lib, "steamapps", "common", steamFolderName, "game");
     if (fs.existsSync(game)) return game;
   }
   return null;
+}
+
+/** The CK3 `game` data folder, or null if the game is not found in any library. */
+export function findCk3GamePath(): string | null {
+  return findGameFolder("Crusader Kings III");
 }

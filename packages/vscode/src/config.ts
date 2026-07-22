@@ -4,8 +4,14 @@ import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { sanitizeStringList } from "@paradox-lsp/protocol/suppression";
+import { hasMetadataDescriptor } from "@paradox-lsp/protocol/descriptorMetadata";
+import { findGameFolder } from "./steamDetect";
+import { ck3Meta } from "@paradox-lsp/server/games/ck3/meta";
+import { vic3Meta } from "@paradox-lsp/server/games/vic3/meta";
 
 export interface Ck3Config {
+  /** Active game profile id: "ck3", or "vic3" behind ck3.vic3Preview. */
+  gameId: string;
   /** Path to `Crusader Kings III/game`, or null if unset/invalid. */
   gamePath: string | null;
   /** Folder holding script_docs logs, or null if it cannot be found. */
@@ -69,8 +75,8 @@ function windowsDocumentsFolder(): string {
   return path.join(os.homedir(), "Documents");
 }
 
-function defaultLogsPath(): string | null {
-  const suffix = ["Paradox Interactive", "Crusader Kings III", "logs"];
+function defaultLogsPath(docsFolderName: string, steamAppId: number): string | null {
+  const suffix = ["Paradox Interactive", docsFolderName, "logs"];
   const candidates: string[] = [];
   if (process.platform === "win32") {
     candidates.push(path.join(windowsDocumentsFolder(), ...suffix));
@@ -82,7 +88,7 @@ function defaultLogsPath(): string | null {
     candidates.push(
       path.join(
         os.homedir(),
-        ".steam/steam/steamapps/compatdata/1158310/pfx/drive_c/users/steamuser/Documents",
+        `.steam/steam/steamapps/compatdata/${steamAppId}/pfx/drive_c/users/steamuser/Documents`,
         ...suffix
       )
     );
@@ -91,6 +97,15 @@ function defaultLogsPath(): string | null {
     if (fs.existsSync(c)) return c;
   }
   return null;
+}
+
+/** A Vic3-style mod: metadata descriptor, no launcher .mod descriptor. */
+function looksLikeMetadataMod(dir: string): boolean {
+  try {
+    return hasMetadataDescriptor(dir) && !fs.existsSync(path.join(dir, "descriptor.mod"));
+  } catch {
+    return false;
+  }
 }
 
 export function readConfig(): Ck3Config {
@@ -119,13 +134,10 @@ export function readConfig(): Ck3Config {
     }
   }
 
-  const gamePath = readPath("gamePath", "Game path") ?? workspaceGameDir;
+  let gamePath = readPath("gamePath", "Game path") ?? workspaceGameDir;
   let logsPath = readPath("logsPath", "script_docs logs path");
-  if (logsPath === null && (cfg.get<string>("logsPath") ?? "").trim() === "") {
-    logsPath = defaultLogsPath();
-  }
 
-  const tigerPath = readPath("tigerPath", "ck3-tiger path");
+  let tigerPath = readPath("tigerPath", "ck3-tiger path");
 
   let modPath = readPath("modPath", "Mod path");
 
@@ -199,6 +211,23 @@ export function readConfig(): Ck3Config {
   }
   for (const p of workspaceMods) addParent(p);
 
+  // Game selection (M4 preview): a workspace whose mod-of-record carries a
+  // .metadata/metadata.json descriptor (and no launcher .mod file) is a
+  // Victoria 3 mod — honored only behind ck3.vic3Preview. The ck3.* path
+  // settings describe CK3 and are deliberately IGNORED for a Vic3 workspace:
+  // game/logs resolve from Steam/Documents, tiger from the vic3-tiger
+  // download (see extension.ts).
+  const vic3Preview = cfg.get<boolean>("vic3Preview") ?? false;
+  const primaryRoot = modPath ?? workspaceRoots[0] ?? null;
+  const gameId = vic3Preview && primaryRoot !== null && looksLikeMetadataMod(primaryRoot) ? vic3Meta.id : ck3Meta.id;
+  if (gameId === vic3Meta.id) {
+    gamePath = findGameFolder(vic3Meta.name);
+    logsPath = defaultLogsPath(vic3Meta.docsFolderName, vic3Meta.steamAppId);
+    tigerPath = null;
+  } else if (logsPath === null && (cfg.get<string>("logsPath") ?? "").trim() === "") {
+    logsPath = defaultLogsPath(ck3Meta.docsFolderName, ck3Meta.steamAppId);
+  }
+
   const tigerRunOn = cfg.get<string>("tigerRunOn") === "manual" ? "manual" : "save";
   const enableForWorkspace = cfg.get<boolean>("enableForWorkspace") ?? true;
   const isCk3Workspace =
@@ -208,6 +237,7 @@ export function readConfig(): Ck3Config {
       workspaceMods.length > 0);
 
   return {
+    gameId,
     gamePath,
     logsPath,
     tigerPath,
@@ -281,10 +311,12 @@ export function modRootFor(file: string, cfg: Ck3Config): string | null {
   return null;
 }
 
-/** A folder counts as a CK3 mod if it has a descriptor or the usual content dirs. */
+/** A folder counts as a mod if it has a descriptor (either convention) or the
+ * usual content dirs. */
 export function looksLikeMod(dir: string): boolean {
   try {
     if (fs.existsSync(path.join(dir, "descriptor.mod"))) return true;
+    if (hasMetadataDescriptor(dir)) return true;
     return ["common", "events", "localization", "gui", "history"].some((d) =>
       fs.existsSync(path.join(dir, d))
     );

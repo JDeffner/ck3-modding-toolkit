@@ -10,7 +10,7 @@ import type { Ck3Config } from "./config";
 import { LOG_FILES } from "@paradox-lsp/protocol/constants";
 import { readDescriptorName } from "@paradox-lsp/protocol/descriptorMod";
 import { findCk3GamePath } from "./steamDetect";
-import { downloadLatestTiger, findDownloadedTiger } from "./tigerDownload";
+import { downloadLatestTiger, findDownloadedTiger, tigerFlavorFor } from "./tigerDownload";
 
 export interface SetupDeps {
   storageDir: string;
@@ -26,9 +26,10 @@ function scriptDocsPresent(logsPath: string | null): boolean {
 }
 
 export async function downloadTigerCommand(deps: SetupDeps, askFirst: boolean): Promise<string | null> {
+  const flavor = tigerFlavorFor(deps.getConfig().gameId);
   if (askFirst) {
     const choice = await vscode.window.showInformationMessage(
-      "Download ck3-tiger (mod validator, ~15 MB) from github.com/amtep/tiger into the extension's storage?",
+      `Download ${flavor.prefix} (mod validator, ~15 MB) from github.com/amtep/tiger into the extension's storage?`,
       "Download",
       "Not now"
     );
@@ -36,15 +37,19 @@ export async function downloadTigerCommand(deps: SetupDeps, askFirst: boolean): 
   }
   try {
     const result = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: "ck3-tiger" },
+      { location: vscode.ProgressLocation.Notification, title: flavor.prefix },
       (progress) =>
-        downloadLatestTiger(deps.storageDir, (msg) => {
-          deps.log(`tiger download: ${msg}`);
-          progress.report({ message: msg });
-        })
+        downloadLatestTiger(
+          deps.storageDir,
+          (msg) => {
+            deps.log(`tiger download: ${msg}`);
+            progress.report({ message: msg });
+          },
+          flavor
+        )
     );
     deps.log(`tiger ${result.version} installed at ${result.binaryPath}`);
-    void vscode.window.showInformationMessage(`ck3-tiger ${result.version} is ready — diagnostics are enabled.`);
+    void vscode.window.showInformationMessage(`${flavor.prefix} ${result.version} is ready — diagnostics are enabled.`);
     deps.refresh();
     return result.binaryPath;
   } catch (err) {
@@ -108,7 +113,7 @@ export async function runSetup(deps: SetupDeps): Promise<void> {
   }
 
   // 4. Tiger.
-  const effectiveTiger = cfg.tigerPath ?? findDownloadedTiger(deps.storageDir);
+  const effectiveTiger = cfg.tigerPath ?? findDownloadedTiger(deps.storageDir, tigerFlavorFor(cfg.gameId));
   if (effectiveTiger) {
     report.push(`✓ ck3-tiger: ${effectiveTiger}`);
   } else {

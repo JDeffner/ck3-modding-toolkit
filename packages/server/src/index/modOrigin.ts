@@ -7,6 +7,13 @@
  */
 import * as path from "path";
 import { readDescriptorName } from "@paradox-lsp/protocol/descriptorMod";
+import { readMetadataName } from "@paradox-lsp/protocol/descriptorMetadata";
+
+/** Display name from either descriptor convention (launcher .mod file, else
+ *  .metadata/metadata.json), so labels work for every supported game. */
+function readModName(root: string): string | null {
+  return readDescriptorName(root) ?? readMetadataName(root);
+}
 
 /** Hover head lines stay compact: clip pathological descriptor names. */
 const MAX_LABEL = 40;
@@ -26,7 +33,7 @@ export class ModOriginResolver {
       .map((root) => ({
         root,
         prefix: path.normalize(root).toLowerCase().replace(/[\\/]+$/, "") + path.sep,
-        label: clip(readDescriptorName(root) ?? path.basename(root)),
+        label: clip(readModName(root) ?? path.basename(root)),
       }))
       .sort((a, b) => b.prefix.length - a.prefix.length);
   }
@@ -57,6 +64,6 @@ export class ModOriginResolver {
     for (const r of this.roots) {
       if (r.prefix === lower + path.sep) return r.label;
     }
-    return clip(readDescriptorName(root) ?? path.basename(root));
+    return clip(readModName(root) ?? path.basename(root));
   }
 }

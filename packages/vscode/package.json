@@ -559,6 +559,12 @@
             "order": 2,
             "markdownDescription": "Escape hatch: set to false to stop this workspace's txt/yml files from being switched to the CK3 language modes."
           },
+          "ck3.vic3Preview": {
+            "type": "boolean",
+            "default": false,
+            "order": 3,
+            "markdownDescription": "**Preview**: enable Victoria 3 support. A workspace mod carrying a `.metadata/metadata.json` descriptor (and no `descriptor.mod`) is treated as a Vic3 mod: game and script_docs logs are auto-detected (Steam / Documents — the `ck3.gamePath`/`ck3.logsPath`/`ck3.tigerPath` settings are ignored for Vic3), vic3-tiger is downloaded on demand, and the language server uses its Vic3 profile (completion/hover/navigation/diagnostics; no GUI preview or data-type chains yet)."
+          },
           "ck3.trace.server": {
             "type": "string",
             "enum": [

@@ -12,29 +12,49 @@ import { execFileSync } from "child_process";
 
 const RELEASES_API = "https://api.github.com/repos/amtep/tiger/releases/latest";
 
+/** Which tiger to fetch/run. The amtep/tiger releases ship one archive per
+ * game (ck3-tiger-*, vic3-tiger-*); flavors keep the downloads apart. */
+export interface TigerFlavor {
+  /** Asset/binary name prefix ("ck3-tiger", "vic3-tiger"). */
+  prefix: string;
+  /** Storage subfolder under global storage ("tiger" is the legacy CK3 spot). */
+  subdir: string;
+}
+
+export const CK3_TIGER: TigerFlavor = { prefix: "ck3-tiger", subdir: "tiger" };
+export const VIC3_TIGER: TigerFlavor = { prefix: "vic3-tiger", subdir: "tiger-vic3" };
+
+export function tigerFlavorFor(gameId: string): TigerFlavor {
+  return gameId === "vic3" ? VIC3_TIGER : CK3_TIGER;
+}
+
 export interface ReleaseAsset {
   name: string;
   browser_download_url: string;
 }
 
-/** The right ck3-tiger asset for this platform, or null (e.g. macOS has no prebuilt). */
-export function pickTigerAsset(assets: ReleaseAsset[], platform: NodeJS.Platform): ReleaseAsset | null {
+/** The right tiger asset for this platform, or null (e.g. macOS has no prebuilt). */
+export function pickTigerAsset(
+  assets: ReleaseAsset[],
+  platform: NodeJS.Platform,
+  flavor: TigerFlavor = CK3_TIGER
+): ReleaseAsset | null {
   const pattern =
     platform === "win32"
-      ? /^ck3-tiger-windows-.*\.zip$/
+      ? new RegExp(`^${flavor.prefix}-windows-.*\\.zip$`)
       : platform === "linux"
-        ? /^ck3-tiger-linux-.*\.(tar\.gz|tgz)$/
+        ? new RegExp(`^${flavor.prefix}-linux-.*\\.(tar\\.gz|tgz)$`)
         : null;
   if (!pattern) return null;
   return assets.find((a) => pattern.test(a.name)) ?? null;
 }
 
-function tigerStorageDir(storageDir: string): string {
-  return path.join(storageDir, "tiger");
+function tigerStorageDir(storageDir: string, flavor: TigerFlavor): string {
+  return path.join(storageDir, flavor.subdir);
 }
 
-/** Every ck3-tiger binary inside `dir` (recursive). */
-function findBinaries(dir: string): string[] {
+/** Every tiger binary of the flavor inside `dir` (recursive). */
+function findBinaries(dir: string, flavor: TigerFlavor): string[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -45,10 +65,13 @@ function findBinaries(dir: string): string[] {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      found.push(...findBinaries(full));
+      found.push(...findBinaries(full, flavor));
     } else if (
       entry.isFile() &&
-      (process.platform === "win32" ? /^ck3-tiger.*\.exe$/i : /^ck3-tiger[^.]*$/).test(entry.name)
+      (process.platform === "win32"
+        ? new RegExp(`^${flavor.prefix}.*\\.exe$`, "i")
+        : new RegExp(`^${flavor.prefix}[^.]*$`)
+      ).test(entry.name)
     ) {
       found.push(full);
     }
@@ -71,14 +94,14 @@ export function preferPlainBinary(paths: string[]): string | null {
   return plain ?? paths[0];
 }
 
-/** The ck3-tiger binary to use inside `dir` (recursive), plain variant preferred. */
-function locateBinary(dir: string): string | null {
-  return preferPlainBinary(findBinaries(dir));
+/** The tiger binary to use inside `dir` (recursive), plain variant preferred. */
+function locateBinary(dir: string, flavor: TigerFlavor): string | null {
+  return preferPlainBinary(findBinaries(dir, flavor));
 }
 
 /** The most recently downloaded tiger binary in global storage, or null. */
-export function findDownloadedTiger(storageDir: string): string | null {
-  const base = tigerStorageDir(storageDir);
+export function findDownloadedTiger(storageDir: string, flavor: TigerFlavor = CK3_TIGER): string | null {
+  const base = tigerStorageDir(storageDir, flavor);
   let versions: string[];
   try {
     versions = fs.readdirSync(base).sort().reverse();
@@ -86,7 +109,7 @@ export function findDownloadedTiger(storageDir: string): string | null {
     return null;
   }
   for (const v of versions) {
-    const bin = locateBinary(path.join(base, v));
+    const bin = locateBinary(path.join(base, v), flavor);
     if (bin) return bin;
   }
   return null;
@@ -103,7 +126,8 @@ export interface TigerDownloadResult {
  */
 export async function downloadLatestTiger(
   storageDir: string,
-  report: (msg: string) => void
+  report: (msg: string) => void,
+  flavor: TigerFlavor = CK3_TIGER
 ): Promise<TigerDownloadResult> {
   report("querying latest release...");
   const apiRes = await fetch(RELEASES_API, {
@@ -112,12 +136,12 @@ export async function downloadLatestTiger(
   if (!apiRes.ok) throw new Error(`GitHub API returned ${apiRes.status} for the tiger releases feed.`);
   const release = (await apiRes.json()) as { tag_name?: string; assets?: ReleaseAsset[] };
   const tag = release.tag_name ?? "unknown";
-  const asset = pickTigerAsset(release.assets ?? [], process.platform);
+  const asset = pickTigerAsset(release.assets ?? [], process.platform, flavor);
   if (!asset) {
     throw new Error(
       process.platform === "darwin"
         ? "tiger has no prebuilt macOS binary; build it from source (github.com/amtep/tiger) and set ck3.tigerPath."
-        : `no ck3-tiger asset found for this platform in release ${tag}.`
+        : `no ${flavor.prefix} asset found for this platform in release ${tag}.`
     );
   }
 
@@ -128,7 +152,7 @@ export async function downloadLatestTiger(
   if (!dlRes.ok) throw new Error(`download failed with HTTP ${dlRes.status}.`);
   const buffer = Buffer.from(await dlRes.arrayBuffer());
 
-  const destDir = path.join(tigerStorageDir(storageDir), tag);
+  const destDir = path.join(tigerStorageDir(storageDir, flavor), tag);
   fs.rmSync(destDir, { recursive: true, force: true });
   fs.mkdirSync(destDir, { recursive: true });
   const archivePath = path.join(destDir, asset.name);
@@ -148,15 +172,15 @@ export async function downloadLatestTiger(
     }
   }
 
-  const binaryPath = locateBinary(destDir);
-  if (!binaryPath) throw new Error(`archive unpacked but no ck3-tiger binary was found in it.`);
+  const binaryPath = locateBinary(destDir, flavor);
+  if (!binaryPath) throw new Error(`archive unpacked but no ${flavor.prefix} binary was found in it.`);
   if (process.platform !== "win32") fs.chmodSync(binaryPath, 0o755);
 
   // Keep only the freshly downloaded version.
-  for (const entry of fs.readdirSync(tigerStorageDir(storageDir))) {
+  for (const entry of fs.readdirSync(tigerStorageDir(storageDir, flavor))) {
     if (entry !== tag) {
       try {
-        fs.rmSync(path.join(tigerStorageDir(storageDir), entry), { recursive: true, force: true });
+        fs.rmSync(path.join(tigerStorageDir(storageDir, flavor), entry), { recursive: true, force: true });
       } catch {
         // old versions are cleaned up best-effort
       }
