@@ -30,6 +30,14 @@ Fixes for the first GitHub issue reports (#1-#4).
   to focus on that node's subtree, Esc to clear. Single click previews the
   source line without stealing focus from the tree; double click jumps into
   the editor. The button disables itself when there is nothing it could do.
+- **Default keybindings for the everyday commands** — GUI layout preview
+  `Ctrl+Alt+P`, widget tree `Ctrl+Alt+W`, event graph `Ctrl+Alt+G`,
+  dependencies `Ctrl+Alt+D`, run tiger `Ctrl+Alt+V`, localization
+  side-by-side `Ctrl+Alt+L`, jump to script reference `Ctrl+Alt+J`, open
+  `.info` docs `Ctrl+Alt+O`, GUI-tree ancestors toggle `Ctrl+Alt+H`. All are
+  scoped to CK3 editors by when-clauses (nothing fires in other projects),
+  and every `CK3:` command stays freely remappable in the Keyboard Shortcuts
+  UI.
 
 ## 0.1.1 (alpha)
 

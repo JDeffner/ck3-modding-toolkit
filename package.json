@@ -718,6 +718,46 @@
         "command": "ck3.guiTreeToggleParents",
         "key": "ctrl+alt+h",
         "when": "activeWebviewPanelId == ck3.guiTree"
+      },
+      {
+        "command": "ck3.showGuiPreview",
+        "key": "ctrl+alt+p",
+        "when": "editorTextFocus && editorLangId == paradox-gui"
+      },
+      {
+        "command": "ck3.showGuiTree",
+        "key": "ctrl+alt+w",
+        "when": "editorTextFocus && editorLangId == paradox-gui"
+      },
+      {
+        "command": "ck3.showEventGraph",
+        "key": "ctrl+alt+g",
+        "when": "editorTextFocus && editorLangId == paradox"
+      },
+      {
+        "command": "ck3.showDependencies",
+        "key": "ctrl+alt+d",
+        "when": "editorTextFocus && editorLangId == paradox"
+      },
+      {
+        "command": "ck3.runTiger",
+        "key": "ctrl+alt+v",
+        "when": "editorLangId == paradox || editorLangId == paradox-loc || editorLangId == paradox-gui"
+      },
+      {
+        "command": "ck3.openLocalizationSideBySide",
+        "key": "ctrl+alt+l",
+        "when": "editorTextFocus && (editorLangId == paradox || editorLangId == paradox-loc)"
+      },
+      {
+        "command": "ck3.jumpToScriptReference",
+        "key": "ctrl+alt+j",
+        "when": "editorTextFocus && editorLangId == paradox-loc"
+      },
+      {
+        "command": "ck3.openInfoDocs",
+        "key": "ctrl+alt+o",
+        "when": "editorTextFocus && ck3.hasInfoDoc"
       }
     ]
   },
