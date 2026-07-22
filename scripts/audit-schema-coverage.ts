@@ -14,10 +14,10 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { CK3_SCHEMA } from "../shared/src/schema/ck3Schema";
-import { parseScript } from "../server/src/parser";
-import structuresJson from "../shared/data/structures.json";
-import { requireDevPath } from "../test/devPaths";
+import { CK3_SCHEMA } from "../packages/server/src/schema/ck3Schema";
+import { parseScript } from "../packages/server/src/parser";
+import structuresJson from "../packages/server/data/ck3/structures.json";
+import { requireDevPath } from "./devPaths";
 
 const gamePath = process.argv[2] ?? requireDevPath("gamePath", "audit-schema-coverage");
 

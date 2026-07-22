@@ -3,7 +3,7 @@
  * which keys are used as widget/container blocks, and which properties each
  * carries (with usage counts for ranking). `type X = base { }` declarations
  * fold their property stats into the base type, so derived types enrich the
- * base vocabulary. Output: shared/data/guiSchema.json (bundled).
+ * base vocabulary. Output: packages/server/data/ck3/guiSchema.json (bundled).
  *
  * Run:
  *   npx esbuild scripts/build-gui-schema.ts --bundle --platform=node \
@@ -11,8 +11,8 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { decode, parseScript, type BlockNode, type Statement } from "../server/src/parser";
-import { requireDevPath } from "../test/devPaths";
+import { decode, parseScript, type BlockNode, type Statement } from "../packages/server/src/parser";
+import { requireDevPath } from "./devPaths";
 
 const gamePath = process.argv[2] ?? requireDevPath("gamePath", "build-gui-schema");
 
@@ -206,7 +206,7 @@ const out = {
   enums,
   enumCombinable,
 };
-const target = path.join(__dirname, "..", "shared", "data", "guiSchema.json");
+const target = path.join(__dirname, "..", "packages", "server", "data", "ck3", "guiSchema.json");
 fs.writeFileSync(target, JSON.stringify(out, null, 1), "utf8");
 console.log(
   `wrote ${target}: ${Object.keys(types).length} widget types, ` +

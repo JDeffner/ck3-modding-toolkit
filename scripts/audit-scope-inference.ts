@@ -25,17 +25,17 @@
 import * as fs from "fs";
 import * as path from "path";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { buildEvalEnv } from "../test/rankEvalCore";
-import { loadTokenDataFromLogs } from "../server/src/data/docsParser";
-import { loadWikiTokens, mergeWikiTokens } from "../server/src/data/wikiDocs";
-import { classifyFile } from "../server/src/index/indexer";
-import { walkStatements, decode, LineIndex, type ScalarNode, type Statement } from "../server/src/parser";
-import { getParse, getSavedScopes } from "../server/src/parseCache";
-import { inferScopeAt } from "../server/src/scopes/inference";
-import { inferenceContextFor } from "../server/src/scopes/varTypes";
-import { parseOnActionsLog } from "../server/src/data/docsParser";
-import type { Scope } from "../server/src/scopes/model";
-import { devPath, requireDevPath } from "../test/devPaths";
+import { buildEvalEnv } from "../packages/server/test/rankEvalCore";
+import { loadTokenDataFromLogs } from "../packages/server/src/data/docsParser";
+import { loadWikiTokens, mergeWikiTokens } from "../packages/server/src/data/wikiDocs";
+import { classifyFile } from "../packages/server/src/index/indexer";
+import { walkStatements, decode, LineIndex, type ScalarNode, type Statement } from "../packages/server/src/parser";
+import { getParse, getSavedScopes } from "../packages/server/src/parseCache";
+import { inferScopeAt } from "../packages/server/src/scopes/inference";
+import { inferenceContextFor } from "../packages/server/src/scopes/varTypes";
+import { parseOnActionsLog } from "../packages/server/src/data/docsParser";
+import type { Scope } from "../packages/server/src/scopes/model";
+import { devPath, requireDevPath } from "./devPaths";
 
 const modPath = process.argv[2] ?? requireDevPath("modPath", "audit-scope-inference");
 const gamePath = process.argv[3] ?? requireDevPath("gamePath", "audit-scope-inference");
@@ -196,14 +196,14 @@ async function main(): Promise<void> {
   console.log(`mod:   ${modPath}\ngame:  ${gamePath}\nlogs:  ${logsPath}\n`);
   const t0 = Date.now();
   const env = buildEvalEnv({
-    wikidocsDir: path.join(__dirname, "..", "wikidocs"),
-    freqsDir: path.join(__dirname, "..", "shared", "data"),
+    wikidocsDir: path.join(__dirname, "..", "packages", "server", "data", "ck3", "wikidocs"),
+    freqsDir: path.join(__dirname, "..", "packages", "server", "data", "ck3"),
     gamePath,
     modPath,
   });
   const logTokens = loadTokenDataFromLogs(logsPath);
   if (logTokens.tokens.length > 0) {
-    env.data.setTokens(mergeWikiTokens(logTokens.tokens, loadWikiTokens(path.join(__dirname, "..", "wikidocs"))));
+    env.data.setTokens(mergeWikiTokens(logTokens.tokens, loadWikiTokens(path.join(__dirname, "..", "packages", "server", "data", "ck3", "wikidocs"))));
   }
   console.log(`env ready in ${((Date.now() - t0) / 1000).toFixed(1)}s: ${env.data.tokens.length} tokens`);
 

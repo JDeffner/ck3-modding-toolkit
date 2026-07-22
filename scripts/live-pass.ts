@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   try {
     await runTests({
       vscodeExecutablePath: fs.existsSync(VSCODE_EXE) ? VSCODE_EXE : undefined,
-      extensionDevelopmentPath: repoRoot,
+      extensionDevelopmentPath: path.join(repoRoot, "packages", "vscode"),
       extensionTestsPath: path.join(repoRoot, "dist", "live-pass-suite.cjs"),
       launchArgs: [
         devPaths.modPath,

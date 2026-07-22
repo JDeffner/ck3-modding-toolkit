@@ -7,20 +7,13 @@ settings:
 importers:
 
   .:
-    dependencies:
-      vscode-languageclient:
-        specifier: ^10.1.0
-        version: 10.1.0
-      vscode-languageserver:
-        specifier: ^10.1.0
-        version: 10.1.0
-      vscode-languageserver-textdocument:
-        specifier: ^1.0.12
-        version: 1.0.12
-      vscode-uri:
-        specifier: ^3.1.0
-        version: 3.1.0
     devDependencies:
+      '@paradox-lsp/protocol':
+        specifier: workspace:*
+        version: link:packages/protocol
+      '@paradox-lsp/server':
+        specifier: workspace:*
+        version: link:packages/server
       '@types/node':
         specifier: ^20.14.0
         version: 20.19.43
@@ -45,6 +38,60 @@ importers:
       vscode-jsonrpc:
         specifier: ^9.0.1
         version: 9.0.1
+      vscode-languageserver:
+        specifier: ^10.1.0
+        version: 10.1.0
+      vscode-languageserver-textdocument:
+        specifier: ^1.0.12
+        version: 1.0.12
+
+  packages/protocol: {}
+
+  packages/server:
+    dependencies:
+      '@paradox-lsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      vscode-languageserver:
+        specifier: ^10.1.0
+        version: 10.1.0
+      vscode-languageserver-textdocument:
+        specifier: ^1.0.12
+        version: 1.0.12
+      vscode-uri:
+        specifier: ^3.1.0
+        version: 3.1.0
+
+  packages/vscode:
+    dependencies:
+      vscode-languageclient:
+        specifier: ^10.1.0
+        version: 10.1.0
+      vscode-languageserver:
+        specifier: ^10.1.0
+        version: 10.1.0
+      vscode-languageserver-textdocument:
+        specifier: ^1.0.12
+        version: 1.0.12
+      vscode-uri:
+        specifier: ^3.1.0
+        version: 3.1.0
+    devDependencies:
+      '@paradox-lsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@paradox-lsp/server':
+        specifier: workspace:*
+        version: link:../server
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
+      '@types/vscode':
+        specifier: ^1.90.0
+        version: 1.125.0
+      esbuild:
+        specifier: ^0.24.0
+        version: 0.24.2
 
 packages:
 

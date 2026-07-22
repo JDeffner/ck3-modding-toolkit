@@ -1,11 +1,11 @@
 /** Quick end-to-end completion probes against a real mod env (audit follow-up). */
 import * as path from "path";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { buildEvalEnv } from "../test/rankEvalCore";
-import { loadTokenDataFromLogs, parseOnActionsLog } from "../server/src/data/docsParser";
-import { loadWikiTokens, mergeWikiTokens } from "../server/src/data/wikiDocs";
-import { classifyFile } from "../server/src/index/indexer";
-import { devPath, requireDevPath } from "../test/devPaths";
+import { buildEvalEnv } from "../packages/server/test/rankEvalCore";
+import { loadTokenDataFromLogs, parseOnActionsLog } from "../packages/server/src/data/docsParser";
+import { loadWikiTokens, mergeWikiTokens } from "../packages/server/src/data/wikiDocs";
+import { classifyFile } from "../packages/server/src/index/indexer";
+import { devPath, requireDevPath } from "./devPaths";
 
 const modPath = process.argv[2] ?? requireDevPath("modPath", "probe-completion");
 const gamePath = process.argv[3] ?? requireDevPath("gamePath", "probe-completion");
@@ -13,14 +13,14 @@ const logsPath = process.argv[4] ?? devPath("logsPath") ?? "";
 
 function main(): void {
   const env = buildEvalEnv({
-    wikidocsDir: path.join(__dirname, "..", "wikidocs"),
-    freqsDir: path.join(__dirname, "..", "shared", "data"),
+    wikidocsDir: path.join(__dirname, "..", "packages", "server", "data", "ck3", "wikidocs"),
+    freqsDir: path.join(__dirname, "..", "packages", "server", "data", "ck3"),
     gamePath,
     modPath,
   });
   const logTokens = loadTokenDataFromLogs(logsPath);
   if (logTokens.tokens.length > 0) {
-    env.data.setTokens(mergeWikiTokens(logTokens.tokens, loadWikiTokens(path.join(__dirname, "..", "wikidocs"))));
+    env.data.setTokens(mergeWikiTokens(logTokens.tokens, loadWikiTokens(path.join(__dirname, "..", "packages", "server", "data", "ck3", "wikidocs"))));
   }
   env.data.onActionScopes = parseOnActionsLog(logsPath);
   env.data.rootScopesForFile = (file: string) => {

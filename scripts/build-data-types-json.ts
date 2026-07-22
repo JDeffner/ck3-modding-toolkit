@@ -2,7 +2,7 @@
  * Build-time harvest of data types (for [ ... ] datafunction completion) from
  * the bundled wiki page wikidocs/Data_types.md: the Global Promotes and
  * Global Functions tables plus each `### TypeName` member table under
- * `## Types`. Output: shared/data/dataTypes.json (bundled baseline; the
+ * `## Types`. Output: packages/server/data/ck3/dataTypes.json (bundled baseline; the
  * user's own data_types.log upgrades it at runtime — see
  * server/src/data/dataTypes.ts).
  *
@@ -14,8 +14,8 @@ import * as fs from "fs";
 import * as path from "path";
 
 const root = path.join(__dirname, "..");
-const input = path.join(root, "wikidocs", "Data_types.md");
-const output = path.join(root, "shared", "data", "dataTypes.json");
+const input = path.join(root, "packages", "server", "data", "ck3", "wikidocs", "Data_types.md");
+const output = path.join(root, "packages", "server", "data", "ck3", "dataTypes.json");
 
 const text = fs.readFileSync(input, "utf8");
 

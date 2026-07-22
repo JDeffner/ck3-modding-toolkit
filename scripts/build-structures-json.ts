@@ -2,8 +2,8 @@
  * Build-time harvest of the FULL structure-key layer: every documented
  * `key = value` line in every `_*.info` schema doc the game ships, validated
  * against real usage counts in that folder's vanilla files, emitted as
- * shared/data/structures.json (bundled; merged UNDER the hand-curated
- * shared/src/schema/structures.ts at load time — curated docs always win).
+ * packages/server/data/ck3/structures.json (bundled; merged UNDER the hand-curated
+ * packages/server/src/schema/structures.ts at load time — curated docs always win).
  *
  * Keys are kept when they are actually used in vanilla (count >= 3) or carry
  * a doc comment and appear at least once — this filters the .info files'
@@ -16,9 +16,9 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { CK3_SCHEMA } from "../shared/src/schema/ck3Schema";
-import { parseScript } from "../server/src/parser";
-import { requireDevPath } from "../test/devPaths";
+import { CK3_SCHEMA } from "../packages/server/src/schema/ck3Schema";
+import { parseScript } from "../packages/server/src/parser";
+import { requireDevPath } from "./devPaths";
 
 const gamePath = process.argv[2] ?? requireDevPath("gamePath", "build-structures-json");
 
@@ -289,7 +289,7 @@ const out = {
   sources,
   kinds,
 };
-const target = path.join(__dirname, "..", "shared", "data", "structures.json");
+const target = path.join(__dirname, "..", "packages", "server", "data", "ck3", "structures.json");
 fs.writeFileSync(target, JSON.stringify(out, null, 1), "utf8");
 const total = Object.values(kinds).reduce((n, k) => n + k.topLevel.length, 0);
 console.log(`wrote ${target}: ${Object.keys(kinds).length} kinds, ${total} keys`);

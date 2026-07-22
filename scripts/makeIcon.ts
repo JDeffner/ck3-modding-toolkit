@@ -5,7 +5,7 @@
  * Run: npx esbuild scripts/makeIcon.ts --bundle --platform=node --outfile=dist/makeIcon.cjs && node dist/makeIcon.cjs
  */
 import * as fs from "fs";
-import { encodePng } from "../server/src/dds/png";
+import { encodePng } from "../packages/server/src/dds/png";
 
 const S = 128;
 const px = new Uint8Array(S * S * 4);

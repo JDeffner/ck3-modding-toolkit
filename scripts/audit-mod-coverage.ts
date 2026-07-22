@@ -20,19 +20,19 @@
 import * as fs from "fs";
 import * as path from "path";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { buildEvalEnv } from "../test/rankEvalCore";
-import { loadTokenDataFromLogs } from "../server/src/data/docsParser";
-import { loadWikiTokens, mergeWikiTokens } from "../server/src/data/wikiDocs";
-import { classifyFile } from "../server/src/index/indexer";
-import { provideHover } from "../server/src/features/hover";
-import { provideGuiHover } from "../server/src/features/guiLanguage";
-import { provideSemanticTokens } from "../server/src/features/semanticTokens";
-import { walkStatements, decode, LineIndex, type ScalarNode, type Statement } from "../server/src/parser";
-import { getParse } from "../server/src/parseCache";
-import type { Scope } from "../server/src/scopes/model";
-import grammar from "../syntaxes/paradox.tmLanguage.json";
-import guiGrammar from "../syntaxes/paradox-gui.tmLanguage.json";
-import { devPath, requireDevPath } from "../test/devPaths";
+import { buildEvalEnv } from "../packages/server/test/rankEvalCore";
+import { loadTokenDataFromLogs } from "../packages/server/src/data/docsParser";
+import { loadWikiTokens, mergeWikiTokens } from "../packages/server/src/data/wikiDocs";
+import { classifyFile } from "../packages/server/src/index/indexer";
+import { provideHover } from "../packages/server/src/features/hover";
+import { provideGuiHover } from "../packages/server/src/features/guiLanguage";
+import { provideSemanticTokens } from "../packages/server/src/features/semanticTokens";
+import { walkStatements, decode, LineIndex, type ScalarNode, type Statement } from "../packages/server/src/parser";
+import { getParse } from "../packages/server/src/parseCache";
+import type { Scope } from "../packages/server/src/scopes/model";
+import grammar from "../packages/vscode/syntaxes/paradox.tmLanguage.json";
+import guiGrammar from "../packages/vscode/syntaxes/paradox-gui.tmLanguage.json";
+import { devPath, requireDevPath } from "./devPaths";
 
 const modPath = process.argv[2] ?? requireDevPath("modPath", "audit-mod-coverage");
 const gamePath = process.argv[3] ?? requireDevPath("gamePath", "audit-mod-coverage");
@@ -150,15 +150,15 @@ async function main(): Promise<void> {
 
   const t0 = Date.now();
   const env = buildEvalEnv({
-    wikidocsDir: path.join(__dirname, "..", "wikidocs"),
-    freqsDir: path.join(__dirname, "..", "shared", "data"),
+    wikidocsDir: path.join(__dirname, "..", "packages", "server", "data", "ck3", "wikidocs"),
+    freqsDir: path.join(__dirname, "..", "packages", "server", "data", "ck3"),
     gamePath,
     modPath,
   });
   // Mirror the live server: script_docs logs are authoritative, wiki fills gaps.
   const logTokens = loadTokenDataFromLogs(logsPath);
   if (logTokens.tokens.length > 0) {
-    env.data.setTokens(mergeWikiTokens(logTokens.tokens, loadWikiTokens(path.join(__dirname, "..", "wikidocs"))));
+    env.data.setTokens(mergeWikiTokens(logTokens.tokens, loadWikiTokens(path.join(__dirname, "..", "packages", "server", "data", "ck3", "wikidocs"))));
   }
   console.log(
     `env ready in ${((Date.now() - t0) / 1000).toFixed(1)}s: ` +

@@ -102,7 +102,7 @@ export function generateSkill(paths: DevPaths, srcDir: string, destDir: string):
 
 function main(): void {
   const repoRoot = path.join(__dirname, "..");
-  const srcDir = path.join(repoRoot, "skills", "ck3-modding");
+  const srcDir = path.join(repoRoot, "packages", "vscode", "skills", "ck3-modding");
   const destDir = process.argv[2] ?? "C:/Users/joeld/.claude/skills/ck3-modding";
   const cfgFile = path.join(repoRoot, "dev-paths.json");
 

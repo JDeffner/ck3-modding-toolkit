@@ -22,4 +22,5 @@ jobs:
       - run: pnpm test
       - run: pnpm run compile
       - name: Package (vsix)
+        working-directory: packages/vscode
         run: npx vsce package --allow-missing-repository --no-dependencies

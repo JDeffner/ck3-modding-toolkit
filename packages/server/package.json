@@ -1,0 +1,22 @@
+{
+  "name": "@paradox-lsp/server",
+  "version": "0.1.2",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "description": "Language server for Paradox script (CK3), usable over node-ipc or stdio.",
+  "exports": {
+    "./dds": "./src/dds/index.ts",
+    "./parser": "./src/parser/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "compile": "esbuild src/server.ts --bundle --outfile=dist/server.js --format=cjs --platform=node --target=node18",
+    "watch": "esbuild src/server.ts --bundle --outfile=dist/server.js --format=cjs --platform=node --target=node18 --watch"
+  },
+  "dependencies": {
+    "@paradox-lsp/protocol": "workspace:*",
+    "vscode-languageserver": "^10.1.0",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "vscode-uri": "^3.1.0"
+  }
+}

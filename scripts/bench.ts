@@ -5,8 +5,8 @@
  *
  * Run: npx esbuild scripts/bench.ts --bundle --platform=node --outfile=dist/bench.cjs && node dist/bench.cjs <gamePath>
  */
-import { DefinitionIndex, scanRoot } from "../server/src/index/indexer";
-import { requireDevPath } from "../test/devPaths";
+import { DefinitionIndex, scanRoot } from "../packages/server/src/index/indexer";
+import { requireDevPath } from "./devPaths";
 
 const gamePath = process.argv[2] ?? requireDevPath("gamePath", "bench");
 

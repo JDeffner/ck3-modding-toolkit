@@ -3,10 +3,10 @@
  * (CK3_GAME_PATH) and optionally a mod corpus dir, counting how often each key
  * appears per completion context — reusing the server's own parser and the same
  * context detection completion uses, so the counts reflect what the ranker sees.
- * Emits shared/data/freqs.json (top ~500 names per context + a global token table).
+ * Emits packages/server/data/ck3/freqs.json (top ~500 names per context + a global token table).
  *
  * SHIPPED ARTIFACT: unlike build-structure.ts, this output IS committed and ships
- * with the extension (loaded fail-soft by shared/src/schema/freqs.ts).
+ * with the extension (loaded fail-soft by packages/server/src/schema/freqs.ts).
  *
  * Run:
  *   npx esbuild scripts/build-freqs.ts --bundle --platform=node --outfile=dist/build-freqs.cjs \
@@ -15,12 +15,12 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { classifyFile } from "../server/src/index/indexer";
-import { walkStatements, parseScript, decode, type Statement } from "../server/src/parser";
-import { classifyKeyword } from "../server/src/contextKeywords";
-import { CK3_SCHEMA } from "../shared/src/schema/ck3Schema";
-import { FREQ_CONTEXTS, type FreqContext, type FreqData } from "../shared/src/schema/freqs";
-import { devPath } from "../test/devPaths";
+import { classifyFile } from "../packages/server/src/index/indexer";
+import { walkStatements, parseScript, decode, type Statement } from "../packages/server/src/parser";
+import { classifyKeyword } from "../packages/server/src/contextKeywords";
+import { CK3_SCHEMA } from "../packages/server/src/schema/ck3Schema";
+import { FREQ_CONTEXTS, type FreqContext, type FreqData } from "../packages/server/src/schema/freqs";
+import { devPath } from "./devPaths";
 
 const TOP_PER_CONTEXT = 500;
 const TOP_GLOBAL = 2000;
@@ -146,7 +146,7 @@ const data: FreqData = {
 };
 for (const c of FREQ_CONTEXTS) data.contexts[c] = topN(contexts.get(c)!, TOP_PER_CONTEXT);
 
-const outFile = path.join(__dirname, "..", "shared", "data", "freqs.json");
+const outFile = path.join(__dirname, "..", "packages", "server", "data", "ck3", "freqs.json");
 fs.mkdirSync(path.dirname(outFile), { recursive: true });
 fs.writeFileSync(outFile, JSON.stringify(data));
 console.error(`wrote ${outFile} (${(fs.statSync(outFile).size / 1024).toFixed(0)} KB)`);
