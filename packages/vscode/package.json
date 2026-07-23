@@ -2,7 +2,7 @@
   "name": "ck3-modding-toolkit",
   "displayName": "CK3 Modding Toolkit",
   "description": "Crusader Kings III modding toolkit: completion, go-to-definition, hover docs, ck3-tiger diagnostics, inline localization, event graph and GUI preview.",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "publisher": "JDeffner",
   "author": {
     "name": "Joël Deffner"
